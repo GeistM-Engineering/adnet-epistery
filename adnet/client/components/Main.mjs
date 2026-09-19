@@ -17,6 +17,7 @@ import Headlines from './Headlines.mjs';
 import Links from './Links.mjs';
 import FilesPane from './FilesPane.mjs';
 import Settings from './Settings.mjs';
+import Publishing from './Publishing.mjs';
 import { recordsFor } from '../records.mjs';
 import { factoryFor } from '../factory.mjs';
 
@@ -26,6 +27,7 @@ const PAGES = {
   headlines: { title: 'Headlines', glyph: '❝', component: Headlines },
   links: { title: 'Links', glyph: '↗', component: Links },
   files: { title: 'Art', glyph: '▣', component: FilesPane },
+  publishing: { title: 'Publishing', glyph: '◈', component: Publishing },
   settings: { title: 'Settings', glyph: '⚙', component: Settings, admin: true },
 };
 const DEFAULT_KEY = 'status';
@@ -85,7 +87,7 @@ export default class Main extends Component {
       this.go(el.dataset.go);
     });
     await this._renderActive();
-    await this.draw(PageFooter, { context: this.context }, this.element);
+//    await this.draw(PageFooter, { context: this.context }, this.element);
   }
 
   async go(path) {
