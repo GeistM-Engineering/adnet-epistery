@@ -72,9 +72,13 @@ export default class Status extends Component {
       const vc = (d, st) => (d == null ? '—' : st == null ? `${d}` : `${d} <span class="settled${st > 0 ? '' : ' settled-none'}">${st}&nbsp;✓</span>`);
       const rows = deployed.map((c, i) => {
         const r = reports[i];
-        const badge = c.retired ? '<span class="badge">Retired</span>'
-          : c.fundingTargetWei && !c.fundedTxHash ? '<span class="badge draft">Unfunded</span>'
-          : (r ? r.active : c.active !== false) ? '<span class="badge deployed">Active</span>' : '<span class="badge">Paused</span>';
+        // Unfunded is the contract's to say: no budget staked yet.
+        const unfunded = r ? num(r.budget) === 0 : !!(c.fundingTargetWei && !c.fundedTxHash);
+        const active = r ? r.active : c.active !== false;
+        let badge = '<span class="badge">Paused</span>';
+        if (c.retired) badge = '<span class="badge">Retired</span>';
+        else if (unfunded) badge = '<span class="badge draft">Unfunded</span>';
+        else if (active) badge = '<span class="badge deployed">Active</span>';
         const denied = r?.denied ? num(r.denied.views) + num(r.denied.clicks) : 0;
         const flags = [];
         if (denied) flags.push(`<span class="flag denied" title="flushed but not paid — failed the campaign rule or unattributable">${denied} denied</span>`);
@@ -103,7 +107,8 @@ export default class Status extends Component {
     const txs = [];
     for (const c of deployed) {
       if (c._deployed) txs.push({ type: 'Deployed', c, contract: c.contractAddress, at: c._deployed, by: c._deployedBy });
-      for (const p of c.payments || []) txs.push({ type: TYPE[p.kind] || p.kind, c, pol: p.kind === 'withdraw' ? null : weiToPol(p.amountWei), tx: p.txHash, at: p.at, by: p.by });
+      // A payment recorded before confirmation existed may never have landed — say so.
+      for (const p of c.payments || []) txs.push({ type: `${TYPE[p.kind] || p.kind}${p.confirmed ? '' : ' (unconfirmed)'}`, c, pol: p.kind === 'withdraw' ? null : weiToPol(p.amountWei), tx: p.txHash, at: p.at, by: p.by });
     }
     txs.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
     const tx = this.div('panel');

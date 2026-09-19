@@ -26,7 +26,8 @@ import { esc, shortAddr, weiToPol, polToWei, fmtPol, polUsd } from '../util.mjs'
 import { newId } from '../records.mjs';
 import { mintShortCode } from './Links.mjs';
 import { creativeUrl } from '../creatives.mjs';
-import { factoryAuth, payFromTreasury, withdrawBudget, canPay, treasury, signerAddress, explorer } from '../signer.mjs';
+import { announce } from '../scan.mjs';
+import { factoryAuth, addBudget, withdrawBudget, canPay, treasury, signerAddress, explorer } from '../signer.mjs';
 
 const STATUS_OPTIONS = ['ACTIVE', 'PAUSED', 'INACTIVE'];
 // The payment rule the Agency enforces at settlement, baked onto the contract at
@@ -96,6 +97,8 @@ export default class CampaignProps extends Component {
     const deployed = !!c.contractAddress;
     const edit = context.canEdit;
     this.payer = deployed ? await canPay(ctx) : false;
+    // Whether the budget is staked is the CONTRACT's to say, not this record's.
+    this.report = deployed ? await context.factory.report(c.factoryCampaignId) : null;
 
     // --- header ---
     const header = this.div('detail-header');
@@ -180,9 +183,12 @@ export default class CampaignProps extends Component {
     return this.div('section-panel', section);
   }
 
+  // Deployed, not retired, and the contract holds no budget yet. Read from the
+  // contract (via the factory report); the record only remembers what was tried.
   _unfunded() {
     const c = this.campaign;
-    return !!(c.contractAddress && c.fundingTargetWei && !c.fundedTxHash && !c.retired);
+    if (!c.contractAddress || c.retired || !c.fundingTargetWei) return false;
+    return this.report ? Number(this.report.budget) === 0 : !c.fundedTxHash;
   }
 
   _payload() {
@@ -318,7 +324,18 @@ export default class CampaignProps extends Component {
       c._deployedBy = c.deploying.by;
       delete c.deploying;
       await context.records.put('campaign', c);
-      return `Deployed — contract ${c.contractAddress}. Stake its budget to start serving.`;
+
+      // Tell scan the campaign exists. The deploy stands either way; a campaign
+      // that is not yet announced keeps an Announce button.
+      step('announcing to scan');
+      let announced = '';
+      try {
+        await announce(c.contractAddress);
+        c.announcedAt = new Date().toISOString();
+        await context.records.put('campaign', c);
+        announced = ' Announced to scan.';
+      } catch (e) { announced = ` Not announced to scan (${esc(e.message)}).`; }
+      return `Deployed — contract ${esc(c.contractAddress)}.${announced} Stake its budget to start serving.`;
     });
   }
 
@@ -377,7 +394,7 @@ export default class CampaignProps extends Component {
     if (!(await this._treasuryCovers(wei))) return;
     return this._pay('Stake',
       `Stake ${fmtPol(weiToPol(wei))} from this identity's treasury into campaign contract ${shortAddr(c.contractAddress)}? This device signs; the identity pays the stake, the device pays the gas.`,
-      'fund', wei, () => payFromTreasury(this.context.ctx, c.contractAddress, wei));
+      'fund', wei, (step) => addBudget(this.context.ctx, c.contractAddress, wei, step));
   }
 
   async addBudget() {
@@ -395,14 +412,14 @@ export default class CampaignProps extends Component {
     if (!(await this._treasuryCovers(wei))) return;
     return this._pay('Add budget',
       `Add $${usd} (${fmtPol(weiToPol(wei), 3)}) from this identity's treasury to ${esc(c.name)}? This device signs; the identity pays, the device pays the gas.`,
-      'budget', wei, () => payFromTreasury(this.context.ctx, c.contractAddress, wei), { usd });
+      'budget', wei, (step) => addBudget(this.context.ctx, c.contractAddress, wei, step), { usd });
   }
 
   withdraw() {
     const c = this.campaign;
     return this._pay('Withdraw',
       'Withdraw the unspent budget back to this identity and retire the campaign? It is paused on chain and the remaining balance returns to the treasury.',
-      'withdraw', 0n, () => withdrawBudget(this.context.ctx, c.contractAddress));
+      'withdraw', 0n, (step) => withdrawBudget(this.context.ctx, c.contractAddress, step));
   }
 
   async _confirmThen(label, question, fn) {
@@ -410,20 +427,20 @@ export default class CampaignProps extends Component {
     return this._run(label, fn);
   }
 
-  // Sign and send a treasury payment, then keep it on the record with its hash.
+  // Sign and send a treasury payment; once the chain shows it, keep it on the
+  // record with its hash.
   _pay(label, question, kind, wei, send, extra = {}) {
     const c = this.campaign;
     return this._confirmThen(label, question, async (step) => {
-      step('waiting for your signature');
-      const txHash = await send();
-      const payment = { kind, txHash, amountWei: wei.toString(), ...extra, by: await signerAddress(), at: new Date().toISOString() };
+      const txHash = await send(step);
+      const payment = { kind, txHash, amountWei: wei.toString(), ...extra, confirmed: true, by: await signerAddress(), at: new Date().toISOString() };
       c.payments = [...(c.payments || []), payment];
       if (kind === 'fund') c.fundedTxHash = txHash;
       if (kind === 'budget' && extra.usd) c.budget = (Number(c.budget) || 0) + extra.usd;   // display; the contract is the truth
       if (kind === 'withdraw') { c.active = false; c.retired = true; }
       await this.context.records.put('campaign', c);
       const x = await explorer();
-      return `${label} sent — transaction <a href="${x.tx(txHash)}" target="_blank" rel="noopener" class="mono">${shortAddr(txHash)}</a>.`;
+      return `${label} confirmed — transaction <a href="${x.tx(txHash)}" target="_blank" rel="noopener" class="mono">${shortAddr(txHash)}</a>.`;
     });
   }
 
@@ -464,7 +481,19 @@ export default class CampaignProps extends Component {
     b.scrollIntoView?.({ block: 'nearest' });
   }
 
-  // What stays in view between acts: an unfinished deploy, or a stake still owed.
+  announceNow() {
+    const c = this.campaign;
+    return this._run('Announce', async (step) => {
+      step('telling scan about the campaign contract');
+      await announce(c.contractAddress);
+      c.announcedAt = new Date().toISOString();
+      await this.context.records.put('campaign', c);
+      return 'Announced to scan — it now reads this campaign from the chain.';
+    });
+  }
+
+  // What stays in view between acts: an unfinished deploy, a stake still owed, or
+  // a campaign scan has not been told about.
   _renderStanding({ clear = true } = {}) {
     if (!this.opSlot) return;
     if (clear) this.opSlot.innerHTML = '';
@@ -489,6 +518,17 @@ export default class CampaignProps extends Component {
       } else {
         b.insertAdjacentHTML('beforeend', '<span class="op-when">A device of the advertiser identity stakes it.</span>');
       }
+      this.opSlot.append(b);
+    }
+    if (c.contractAddress && !c.announcedAt && !c.retired && this.context.canEdit) {
+      const b = document.createElement('div');
+      b.className = 'op-banner pending';
+      b.innerHTML = '<span class="op-text">Scan has not been told about this campaign, so it is not in the index.</span>';
+      const btn = document.createElement('button');
+      btn.className = 'adnet-btn';
+      btn.textContent = 'Announce to scan';
+      btn.addEventListener('click', () => this.announceNow());
+      b.append(btn);
       this.opSlot.append(b);
     }
   }

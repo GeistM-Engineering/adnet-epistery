@@ -4,15 +4,20 @@
 // The advertiser is the session's owner identity, a contract. It cannot sign; its
 // signers can:
 //   factoryAuth()     — a fresh "Epistery Auth <ms>" signature for one factory call.
-//   payFromTreasury() — identity.sendETH(campaign, amount): the identity's own money
-//                       into the campaign contract, whose receive() credits its
-//                       budget. The identity pays the stake; the device pays gas.
+//   addBudget()       — identity.executeTransaction(campaign, amount, addBudget()):
+//                       the identity's own money into the campaign contract's payable
+//                       addBudget(). The identity pays the stake; the device pays gas.
+//                       (Not sendETH: its transfer() forwards 2300 gas, which the
+//                       campaign's receive() cannot run on — it reverts.)
 //   withdrawBudget()  — identity.executeTransaction(campaign, 0, withdrawBudget()):
 //                       the unspent budget back to the identity; campaign retired.
+// A transaction is only a fact once the chain shows it: each waits until the
+// campaign contract's balance has moved, and fails loudly if it does not.
 // The signature is the explicit acknowledgment that money moves.
 
 const ep = () => import('/epistery.mjs');
 
+const SEL_ADD_BUDGET = '0x687792db';        // CampaignContract.addBudget() payable
 const SEL_WITHDRAW_BUDGET = '0x579a583e';   // CampaignContract.withdrawBudget()
 
 export async function factoryAuth() {
@@ -43,15 +48,38 @@ export async function canPay(ctx) {
   try { await asAdvertiser(ctx); return true; } catch { return false; }
 }
 
-export async function payFromTreasury(ctx, campaignContract, wei) {
+// Poll an address's balance until `landed(wei)` holds. Bounded — silence is not
+// an answer, and a payment the chain never shows must not be recorded as made.
+async function awaitBalance(e, address, landed, { tries = 40, delayMs = 3000 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try { if (landed(BigInt((await e.polBalance(address)).wei))) return true; } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
+function notLanded(label, txHash) {
+  return new Error(`the ${label} was sent (transaction ${txHash}) but the campaign contract's balance has not moved — it most likely reverted. Nothing was recorded; check the transaction on the explorer.`);
+}
+
+export async function addBudget(ctx, campaignContract, wei, step = () => {}) {
   const e = await asAdvertiser(ctx);
-  const { txHash } = await e.sendFromContract(campaignContract, BigInt(wei).toString());
+  const amount = BigInt(wei);
+  const before = BigInt((await e.polBalance(campaignContract)).wei);
+  step('waiting for your signature');
+  const { txHash } = await e.callFromContract(campaignContract, SEL_ADD_BUDGET, amount.toString());
+  step('confirming on chain');
+  if (!(await awaitBalance(e, campaignContract, (b) => b >= before + amount))) throw notLanded('payment', txHash);
   return txHash;
 }
 
-export async function withdrawBudget(ctx, campaignContract) {
+export async function withdrawBudget(ctx, campaignContract, step = () => {}) {
   const e = await asAdvertiser(ctx);
+  const before = BigInt((await e.polBalance(campaignContract)).wei);
+  step('waiting for your signature');
   const { txHash } = await e.callFromContract(campaignContract, SEL_WITHDRAW_BUDGET, 0);
+  step('confirming on chain');
+  if (!(await awaitBalance(e, campaignContract, (b) => b < before))) throw notLanded('withdrawal', txHash);
   return txHash;
 }
 
