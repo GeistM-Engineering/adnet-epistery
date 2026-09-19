@@ -1,0 +1,153 @@
+{
+  "name": "geistm/adnet",
+  "title": "GeistM Adnet",
+  "description": "Advertise on the GeistM Adnet from an epistery session. The session's owner identity is the advertiser: each campaign deploys as its own contract, staked from the identity's treasury on a signer's own signature. Campaigns, links and headlines are sealed in the session; images come from the session's Files.",
+  "author": "GeistM",
+  "main": "index.mjs",
+  "icon": "icon.svg",
+  "tools": [
+    {
+      "name": "list_campaigns",
+      "scope": "read",
+      "description": "List this session's campaigns (drafts and deployed). Each comes back as {id, record} — record is the JSON of the campaign, opened with your key.",
+      "method": "GET",
+      "path": "/records/campaign",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_links",
+      "scope": "read",
+      "description": "List this session's destination links. Each comes back as {id, record} — record is the JSON of the link, opened with your key.",
+      "method": "GET",
+      "path": "/records/link",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_headlines",
+      "scope": "read",
+      "description": "List this session's headlines. Each comes back as {id, record} — record is the JSON of the headline, opened with your key.",
+      "method": "GET",
+      "path": "/records/headline",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "create_campaign",
+      "scope": "edit",
+      "description": "Create a draft campaign. Deploying and staking it are a signer's acts in the console, not tools.",
+      "method": "POST",
+      "path": "/records/campaign",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._~-]+$",
+            "description": "URL-safe; part of every deployed link; permanent."
+          },
+          "status": {
+            "type": "string",
+            "description": "ACTIVE | PAUSED | INACTIVE"
+          },
+          "budget": {
+            "type": "number",
+            "description": "Budget in USD"
+          },
+          "pacing": {
+            "type": "number",
+            "description": "Pacing in minutes; omit for none"
+          },
+          "settlementRule": {
+            "type": "string",
+            "description": "'open' or 'confirmedDomain'"
+          },
+          "attributes": {
+            "type": "object",
+            "description": "Querystring pairs appended to every click"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files entry ids (list_entries)"
+          },
+          "headlines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Headline ids"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Link ids"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_link",
+      "scope": "edit",
+      "description": "Create a destination link: a target URL plus querystring attributes.",
+      "method": "POST",
+      "path": "/records/link",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "attributes": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "name": "create_headline",
+      "scope": "edit",
+      "description": "Add a headline.",
+      "method": "POST",
+      "path": "/records/headline",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "subtext": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "crypto": {
+    "contentField": "record"
+  }
+}

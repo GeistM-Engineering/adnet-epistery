@@ -1,0 +1,24 @@
+{
+  "name": "@geistm/adnet-epistery",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GeistM Adnet for Epistery — the Adnet campaign builder as an epistery console session kind. The session's owner identity is the advertiser; its signers deploy, stake and withdraw from their own browsers.",
+  "exports": {
+    "./adnet": "./adnet/index.mjs",
+    "./adnet/epistery.json": "./adnet/epistery.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "adnet/",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GeistM-Engineering/adnet-epistery.git"
+  },
+  "author": "GeistM",
+  "license": "MIT",
+  "peerDependencies": {
+    "express": "^4.18.0"
+  }
+}
