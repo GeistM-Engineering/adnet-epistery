@@ -8,6 +8,12 @@
 //
 //   Adnet factory — the Agency campaigns deploy through
 //   Image folder  — the Files folder the campaign image picker shows
+//
+// This draws into the SHELL's settings modal, as its plugin tab (Main.openSettings)
+// — beside Members, Discovery, Bot access and Danger, which are the session's and
+// not adnet's. So it carries no heading of its own (the modal titles the section)
+// and no separate Save toolbar: the one Save belongs to the one thing here that
+// is adnet's to write, the configuration.
 
 import Component from '/lib/componentry.mjs';
 import { InputUrl } from './InputText.mjs';
@@ -25,6 +31,7 @@ export default class Settings extends Component {
 .Settings dl { display: flex; flex-wrap: wrap; gap: var(--spacerhalf) var(--spacer2); margin: 0; }
 .Settings dt { flex: 0 0 140px; color: var(--text-muted); }
 .Settings dd { flex: 1 1 240px; margin: 0; min-width: 0; }
+.Settings .save-row { display: flex; justify-content: flex-end; margin-top: var(--spacer2); }
 `;
 
   constructor(props) {
@@ -37,10 +44,6 @@ export default class Settings extends Component {
     const { ctx } = this.props.context;
     const params = ctx.session.params || {};
     this.data = { adnetBaseUrl: params.adnetBaseUrl || DEFAULT_ADNET_URL, imageFolder: params.imageFolder || '' };
-
-    const toolbar = this.div('toolbar');
-    toolbar.innerHTML = '<h2>Settings</h2>';
-    await this.draw(Button, { title: 'Save', variant: 'primary', onClick: () => this.save() }, toolbar);
 
     // Who the advertiser is, and who may act and pay for it.
     const who = this.div('panel');
@@ -61,6 +64,8 @@ export default class Settings extends Component {
     const options = [{ name: 'All images', value: '' }, ...folders.map((f) => ({ name: f.name, value: f.id }))];
     await this.draw(InputSelect, { name: 'imageFolder', title: 'Image folder', options, data: this.data }, fields);
     this.div('help', fields).textContent = 'The folder under Art that the campaign image picker shows.';
+
+    await this.draw(Button, { title: 'Save', variant: 'primary', onClick: () => this.save() }, this.div('save-row', cfg));
   }
 
   async _who(panel) {
@@ -71,7 +76,8 @@ export default class Settings extends Component {
       <dt>Identity</dt><dd>${name ? `${esc(name)} · ` : ''}<span class="mono">${esc(owner)}</span></dd>
       <dt>Pays from</dt><dd>the identity's treasury, on a signer's own signature</dd>
     </dl>
-    <p class="help">Campaigns name this identity as their advertiser. Its signers — and the admins of this session — may deploy and operate them; only its signers can stake or withdraw.</p>`;
+    <p class="help">Campaigns name this identity as their advertiser. Its signers — and the admins of this session — may deploy and operate them; only its signers can stake or withdraw.
+      Who those admins and members are is the session's own roster, on the <strong>Members</strong> tab.</p>`;
   }
 
   async save() {

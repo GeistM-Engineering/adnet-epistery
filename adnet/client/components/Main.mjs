@@ -28,9 +28,18 @@ const PAGES = {
   links: { title: 'Links', glyph: '↗', component: Links },
   files: { title: 'Art', glyph: '▣', component: FilesPane },
   publishing: { title: 'Publishing', glyph: '◈', component: Publishing },
-  settings: { title: 'Settings', glyph: '⚙', component: Settings, admin: true },
 };
 const DEFAULT_KEY = 'status';
+
+// Settings is NOT one of the pages. Who may read, write and administer this
+// session is the session's own member list, and it has exactly one home: the
+// console's settings modal (Members, Discovery, Bot access, Danger). Adnet
+// drawing its configuration as a page of its own left that modal unreachable
+// from here, so there was nowhere to declare a member. The entry now opens the
+// shell's modal and hands it the adnet configuration as one tab — the same
+// `ctx.ui.openSettings` call files, wiki, chatbot and message-board make. Adnet
+// must never grow a member list of its own; there would then be two.
+const SETTINGS_KEY = 'settings';
 
 export default class Main extends Component {
   static css = `
@@ -62,8 +71,7 @@ export default class Main extends Component {
 
   _activeKey() {
     const key = this.context.path.split('/')[1];
-    const page = PAGES[key];
-    return page && (!page.admin || this.context.isAdmin) ? key : DEFAULT_KEY;
+    return PAGES[key] ? key : DEFAULT_KEY;
   }
 
   async render(element) {
@@ -73,10 +81,19 @@ export default class Main extends Component {
     const navHost = subnav || this.div('adnet-nav', row);
     if (subnav) subnav.innerHTML = '';
 
-    const items = Object.entries(PAGES)
-      .filter(([, p]) => !p.admin || this.context.isAdmin)
-      .map(([key, p]) => ({ key, title: p.title, glyph: p.glyph }));
-    this.menu = await this.draw(PageMenu, { items, activeKey: this._activeKey(), onSelect: (k) => this.go(k) }, navHost);
+    const items = Object.entries(PAGES).map(([key, p]) => ({ key, title: p.title, glyph: p.glyph }));
+    // Shown to everyone, like the gear in every other plugin: the SHELL decides
+    // what is inside (Members, Bot access and Danger are its own admin gate, the
+    // declaration is readable by anyone). Gating the entry here instead would
+    // hide the modal from a member who has every right to read it, and would
+    // hide it outright from an admin whose role resolved late or wrong — which is
+    // how this came to look like a missing button in the first place.
+    items.push({ key: SETTINGS_KEY, title: 'Settings', glyph: '⚙' });
+    this.menu = await this.draw(PageMenu, {
+      items,
+      activeKey: this._activeKey(),
+      onSelect: (k) => (k === SETTINGS_KEY ? this.openSettings() : this.go(k)),
+    }, navHost);
 
     this.body = this.div('adnet-body', row);
     // Any [data-go] inside the app is an in-app link.
@@ -88,6 +105,32 @@ export default class Main extends Component {
     });
     await this._renderActive();
 //    await this.draw(PageFooter, { context: this.context }, this.element);
+  }
+
+  // The session's settings, framed by the shell. The adnet configuration goes in
+  // as the modal's plugin tab; Members and the rest are the shell's own.
+  //
+  // The node is built outside our root, so it carries `plugin-adnet` itself —
+  // adnet.css is injected document-wide (mount.mjs) and every rule in it is
+  // scoped to that class, so without it the panel would render unstyled in the
+  // popup.
+  async openSettings() {
+    // A modal is not a place: the menu goes on pointing at the page underneath.
+    this.menu?.setActive(this._activeKey());
+    this.settingsPanel?.teardown?.();
+    this.components = this.components.filter((c) => c !== this.settingsPanel);
+    this.settingsPanel = null;
+    // The adnet configuration is a steward's write (ctx.ui.saveParams, signed by
+    // this device), so a non-admin gets the shell's tabs without it rather than a
+    // Save that can only fail.
+    let host = null;
+    if (this.context.isAdmin) {
+      host = document.createElement('div');
+      host.className = 'plugin-adnet';
+      this.settingsPanel = this.new(Settings, { context: this.context });
+      await this.settingsPanel.render(host);
+    }
+    this.props.ctx.ui?.openSettings?.(host ? { content: host } : {});
   }
 
   async go(path) {
@@ -108,6 +151,7 @@ export default class Main extends Component {
 
   teardown() {
     this.page?.teardown?.();
+    this.settingsPanel?.teardown?.();
     const subnav = this.props.ctx.ui?.subnav;
     if (subnav && this.menu?.element && subnav.contains(this.menu.element)) this.menu.element.remove();
   }

@@ -57,6 +57,22 @@ export class InputNumber extends InputText {
   // An empty box is "no value" (null), not zero — pacing depends on the difference.
   get value() { return this.input.value === '' ? null : Number(this.input.value); }
   set value(v) { this.input.value = v ?? ''; }
+
+  // A number box must not be rewritten from its own announcement. A number input
+  // reports `.value` as '' while its text is an incomplete number, so half way
+  // through typing 0.5 — at "0." — this reads null, and writing null back assigns
+  // '', which replaces the text the user typed. The point is erased on every
+  // attempt, so 0.5 can never be reached (the wheel works: its values are always
+  // whole). Only rewrite when the box says a DIFFERENT number than the data —
+  // which leaves a partial entry alone, keeps a trailing zero, and still takes
+  // changes from elsewhere.
+  async handleUpdate(attributeName) {
+    if (this.props.name === attributeName && this.input
+      && Number(this.input.value) === Number(this.props.data[this.props.name])) {
+      return Component.prototype.handleUpdate.call(this, attributeName);
+    }
+    await super.handleUpdate(attributeName);
+  }
 }
 
 export class InputTextArea extends InputText {

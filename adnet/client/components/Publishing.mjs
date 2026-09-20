@@ -10,6 +10,12 @@
 // so in its own manifest), with each one's declaration, whether its contract
 // vouches for it per Scan, ads on/off (for its admins), and its performance as
 // the ad network reports it.
+//
+// A session is not the only thing that can carry ads: any site its owner controls
+// can, on the same terms. The second half of the page is how — the four steps the
+// agency's own publisher docs name, said here so a publisher never has to leave to
+// find them. It is instructions only: nothing on an outside site is configured from
+// here, because nothing about it belongs to this session.
 
 import Component from '/lib/componentry.mjs';
 import { esc, failureNote } from '../util.mjs';
@@ -25,6 +31,14 @@ export default class Publishing extends Component {
 .Publishing .pub-toggle { display: flex; align-items: center; gap: var(--spacerhalf); white-space: nowrap; }
 .Publishing .pub-perf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .Publishing .pub-edit { border: 1px solid var(--page-border); background: var(--bg-color); color: var(--text-color); border-radius: 8px; padding: 0 var(--spacer); font: inherit; cursor: pointer; }
+.Publishing .pub-site { margin-top: var(--spacer3); min-width: 0; }
+.Publishing .pub-step { display: flex; flex-direction: column; gap: var(--spacerhalf); min-width: 0; margin-bottom: var(--spacer2); }
+.Publishing .pub-step:last-child { margin-bottom: 0; }
+.Publishing .pub-step h3 { margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--text-color); }
+.Publishing .pub-step p { margin: 0; color: var(--text-muted); font-size: 0.9em; overflow-wrap: anywhere; }
+.Publishing .pub-step pre { margin: var(--spacerhalf) 0 0; padding: var(--spacer); min-width: 0; overflow-x: auto;
+  background: var(--adnet-quiet-bg); border: 1px solid var(--page-border); border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; color: var(--text-color); }
 `;
 
   async render(element) {
@@ -44,9 +58,10 @@ export default class Publishing extends Component {
       ]);
       hosting = new Map((kinds.kinds || []).filter((k) => k.ads).map((k) => [k.kind, k]));
       sessions = (list.sessions || []).filter((s) => hosting.has(s.kind));
-    } catch (e) { box.innerHTML = failureNote(e, 'list sessions'); return; }
+    } catch (e) { box.innerHTML = failureNote(e, 'list sessions'); this._site(); return; }
     if (!sessions.length) {
       box.innerHTML = `<p class="empty">None of your sessions can carry ads yet. Sessions of these kinds can: ${esc([...hosting.values()].map((k) => k.title).join(', ') || 'none installed')}.</p>`;
+      this._site();
       return;
     }
 
@@ -59,6 +74,62 @@ export default class Publishing extends Component {
       tbody.append(tr);
       this._row(tr, s, hosting.get(s.kind));
     }
+    this._site();
+  }
+
+  // Carrying ads on a site of your own. The same four steps the agency publishes at
+  // /docs#publishers, and the same reason they are in that order: the script only
+  // fills slots, the CNAME only makes the calls first-party, and neither one makes
+  // the site a payee. Scan does, by confirming the site's own declaration — so a
+  // site that skips step 3 still serves ads and still accrues nothing.
+  _site() {
+    const el = this.div('panel pub-site');
+    el.innerHTML = `
+      <div class="panel-title">Carry ads on a site you own</div>
+      <p class="pub-note">A session is not the only thing that can publish. Any site you control can carry the same
+        campaigns on the same terms — it declares itself, Adnet looks it up, and the campaign contract pays it directly.
+        These steps are done on that site, not here.</p>
+
+      <div class="pub-step">
+        <h3>1 · Put slots on the page and load the script</h3>
+        <p>Mark each slot with a class and load the client. It finds the slots, asks which campaigns are live, fetches a
+          server-rendered ad per slot and injects it. Nothing renders, records, settles or identifies anyone in the
+          browser.</p>
+        <pre>&lt;div class="adnet-entry-banner"&gt;&lt;/div&gt;
+&lt;script src="${esc(DEFAULT_AGENCY)}/client/client.js" async&gt;&lt;/script&gt;</pre>
+        <p>Slot classes: <span class="mono">adnet-entry</span> or <span class="mono">adnet-entry-banner</span> (banner),
+          <span class="mono">adnet-entry-square</span>, <span class="mono">adnet-entry-card</span>,
+          <span class="mono">adnet-entry-badge</span>, <span class="mono">adnet-entry-qr</span>.</p>
+      </div>
+
+      <div class="pub-step">
+        <h3>2 · Optional — serve it first-party</h3>
+        <p>Point a <span class="mono">_adnet.&lt;yourdomain&gt;</span> CNAME at the agency and load the script from there
+          instead. Rendering and clicks then run on your own domain. The record is the whole delegation: creating it
+          authorizes Adnet to attribute engagement to the domain. No key is handed over.</p>
+        <pre>_adnet.yourdomain.com.  CNAME  ${esc(DEFAULT_AGENCY.replace(/^https?:\/\//, ''))}.</pre>
+      </div>
+
+      <div class="pub-step">
+        <h3>3 · Declare the site — this is what makes it a payee</h3>
+        <p>Serve a <span class="mono">/.well-known/ai</span> manifest, signed. <a href="https://epistery.com" target="_blank"
+          rel="noopener">Epistery Scan</a> indexes it and confirms it is served from the domain it claims; the payee address
+          Adnet uses at settlement is the one in that declaration. Scan issues nothing — it reports what the site itself
+          says and whether the site stands behind it. An undeclared domain still serves ads and is still attributed, but
+          there is no address to credit. What Scan observes — signature, DNS and on-chain binding, age — also decides which
+          settlement rules the site qualifies under: a <span class="mono">confirmedDomain</span> campaign pays only
+          domain-bound publishers.</p>
+      </div>
+
+      <div class="pub-step">
+        <h3>4 · Withdraw</h3>
+        <p>Settlement credits a balance on each campaign contract. Call <span class="mono">withdraw()</span> on the contract
+          whenever you like — a direct transfer with an on-chain receipt. No threshold, no payout schedule, no one in
+          between.</p>
+      </div>
+
+      <p class="pub-note" style="margin-top: var(--spacer2)">The agency's own publisher documentation:
+        <a href="${esc(DEFAULT_AGENCY)}/docs#publishers" target="_blank" rel="noopener">${esc(DEFAULT_AGENCY)}/docs</a>.</p>`;
   }
 
   async _row(tr, s, kind) {
