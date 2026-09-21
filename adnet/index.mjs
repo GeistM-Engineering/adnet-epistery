@@ -46,6 +46,10 @@ export const manifest = {
     identity's treasury and paid out to the publishers who carry it.`,
   icon: 'icon.svg',
   client: 'client/mount.mjs',
+  // The campaign images are the files plugin verbatim (buildRouter's
+  // compose('files')). Declared here so the registry mounts it and the files
+  // tools are named alongside adnet's own.
+  composes: ['files'],
   // No serverAuthor: nobody writes here but the members themselves.
   paramsSchema: {
     adnetBaseUrl: { type: 'string', required: false },   // the Agency campaigns deploy through
