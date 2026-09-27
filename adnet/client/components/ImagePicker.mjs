@@ -10,7 +10,6 @@
 // Writes the selected entry ids into props.data[props.name].
 
 import Component from '/lib/componentry.mjs';
-import * as cipher from '/lib/cipher.mjs';
 import { esc, failureNote } from '../util.mjs';
 
 export default class ImagePicker extends Component {
@@ -102,13 +101,13 @@ export default class ImagePicker extends Component {
   // Open the image with the key of the epoch that sealed it.
   async _thumb(entry, img) {
     const { ctx } = this.props.context;
-    const K = ctx.keys?.keyFor ? ctx.keys.keyFor(entry.epoch) : ctx.keys?.K;
-    if (!K || !entry.url || !entry.iv) return;
+    if (!ctx.keys.ready || !entry.url || !entry.iv) return;
     try {
       const r = await fetch(ctx.io.resolveRelayUrl?.(entry.url) || entry.url);
       if (!r.ok) return;
-      const blob = await cipher.decryptBlob(K, entry.iv, await r.blob(), entry.mime);
-      const url = URL.createObjectURL(blob);
+      const opened = await ctx.keys.openBlob(entry, await r.blob(), { mime: entry.mime });
+      if (!opened.ok) { console.warn(`[adnet] thumbnail ${entry.name}: ${opened.message}`); return; }
+      const url = URL.createObjectURL(opened.blob);
       this.urls.push(url);
       img.src = url;
     } catch (e) { console.warn('[adnet] thumbnail failed:', e.message); }

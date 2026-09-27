@@ -100,7 +100,8 @@ export function buildRouter({ storage, compose }) {
     }
     const id = crypto.randomBytes(kind === 'campaign' ? 8 : 6).toString('hex');
     try {
-      await storage.writeJSON(fileOf(kind, id), epoch === undefined ? { id, iv, ciphertext } : { id, epoch, iv, ciphertext });
+      // The key epoch rides with the ciphertext; the relay refuses session content without it.
+      await storage.writeJSON(fileOf(kind, id), { id, epoch, iv, ciphertext });
       res.json({ id });
     } catch (e) {
       res.status(403).json({ error: e.message });
