@@ -16,9 +16,13 @@
 // agency's own publisher docs name, said here so a publisher never has to leave to
 // find them. It is instructions only: nothing on an outside site is configured from
 // here, because nothing about it belongs to this session.
+//
+// Last, the same campaigns without the script: a bare /link per campaign and an
+// <img> tag wrapped in it (DirectLinks), with what each way can and cannot see.
 
 import Component from '/lib/componentry.mjs';
 import { esc, failureNote } from '../util.mjs';
+import DirectLinks from './DirectLinks.mjs';
 
 const DEFAULT_AGENCY = 'https://adnet.geistm.com';
 
@@ -130,6 +134,7 @@ export default class Publishing extends Component {
 
       <p class="pub-note" style="margin-top: var(--spacer2)">The agency's own publisher documentation:
         <a href="${esc(DEFAULT_AGENCY)}/docs#publishers" target="_blank" rel="noopener">${esc(DEFAULT_AGENCY)}/docs</a>.</p>`;
+    this.draw(DirectLinks, { agency: DEFAULT_AGENCY }, this.element);
   }
 
   async _row(tr, s, kind) {
