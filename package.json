@@ -1,6 +1,6 @@
 {
   "name": "@geistm/adnet-epistery",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "GeistM Adnet for Epistery — the Adnet campaign builder as an epistery console session kind. The session's owner identity is the advertiser; its signers deploy, stake and withdraw from their own browsers.",
   "exports": {
