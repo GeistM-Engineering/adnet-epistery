@@ -4,8 +4,8 @@
 // /link/<contractAddress> resolves the destination at click time, records the
 // click against the contract, and redirects. Wrapped around the campaign's own
 // creative it is a whole ad in one <img> tag. This panel says what that leaves
-// out next to what the script adds, then lists the live campaigns with their
-// links ready to paste.
+// out next to what the script adds, then lists this session's own deployed
+// campaigns that the agency reports live, with their links ready to paste.
 //
 // The agency serves no image bytes of its own (/render returns an HTML fragment),
 // so an <img> here points at the creative where the campaign keeps it. The
@@ -94,7 +94,7 @@ export default class DirectLinks extends Component {
       </div>
 
       <div class="dl-block">
-        <h3>Live campaigns</h3>
+        <h3>This session's live campaigns</h3>
         <div class="dl-list"><p class="empty">Loading campaigns…</p></div>
       </div>`;
 
@@ -108,17 +108,23 @@ export default class DirectLinks extends Component {
     });
 
     const list = this.element.querySelector('.dl-list');
+    // The session's own campaigns name the contracts; the agency says which are
+    // live and holds their creatives. Only the overlap is listed.
     let campaigns;
     try {
-      const r = await fetch(`${agency}/publish/ads?active=true`, { credentials: 'omit' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      campaigns = ((await r.json()).contracts || []).filter((c) => c.contractAddress);
+      const [mine, r] = await Promise.all([
+        this.props.context.records.list('campaign'),
+        fetch(`${agency}/publish/ads?active=true`, { credentials: 'omit' }),
+      ]);
+      if (!r.ok) throw new Error(`agency HTTP ${r.status}`);
+      const owned = new Set((mine || []).map((c) => c.contractAddress?.toLowerCase()).filter(Boolean));
+      campaigns = ((await r.json()).contracts || []).filter((c) => owned.has(c.contractAddress?.toLowerCase()));
     } catch (e) {
-      list.innerHTML = `<p class="empty">Could not read the agency's live campaigns: ${esc(e.message)}</p>`;
+      list.innerHTML = `<p class="empty">Could not read this session's live campaigns: ${esc(e.message)}</p>`;
       return;
     }
     if (!campaigns.length) {
-      list.innerHTML = '<p class="empty">No campaigns are live at the agency right now.</p>';
+      list.innerHTML = '<p class="empty">None of this session\'s campaigns are deployed and live at the agency.</p>';
       return;
     }
     list.innerHTML = campaigns.map((c) => this._campaign(agency, c)).join('');

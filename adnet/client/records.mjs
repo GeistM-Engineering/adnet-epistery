@@ -5,7 +5,7 @@
 // uses), written rivet-signed straight to the relay (ctx.io.storage). The server
 // only lists what is stored.
 //
-//   campaign-<id> · link-<id> · headline-<id> · creative-<files entry id>
+//   campaign-<id> · link-<id> · headline-<id> · creative-<files entry id> · site-<id>
 
 
 export function newId(bytes = 6) {

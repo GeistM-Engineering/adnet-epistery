@@ -17,7 +17,7 @@
 // find them. It is instructions only: nothing on an outside site is configured from
 // here, because nothing about it belongs to this session.
 //
-// Last, the same campaigns without the script: a bare /link per campaign and an
+// Last, this session's own campaigns without the script: a bare /link per campaign and an
 // <img> tag wrapped in it (DirectLinks), with what each way can and cannot see.
 
 import Component from '/lib/componentry.mjs';
@@ -134,7 +134,7 @@ export default class Publishing extends Component {
 
       <p class="pub-note" style="margin-top: var(--spacer2)">The agency's own publisher documentation:
         <a href="${esc(DEFAULT_AGENCY)}/docs#publishers" target="_blank" rel="noopener">${esc(DEFAULT_AGENCY)}/docs</a>.</p>`;
-    this.draw(DirectLinks, { agency: DEFAULT_AGENCY }, this.element);
+    this.draw(DirectLinks, { agency: DEFAULT_AGENCY, context: this.props.context }, this.element);
   }
 
   async _row(tr, s, kind) {

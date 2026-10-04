@@ -18,6 +18,7 @@ import Links from './Links.mjs';
 import FilesPane from './FilesPane.mjs';
 import Settings from './Settings.mjs';
 import Publishing from './Publishing.mjs';
+import Monitor from './Monitor.mjs';
 import { recordsFor } from '../records.mjs';
 import { factoryFor } from '../factory.mjs';
 
@@ -28,6 +29,7 @@ const PAGES = {
   links: { title: 'Links', glyph: '↗', component: Links },
   files: { title: 'Art', glyph: '▣', component: FilesPane },
   publishing: { title: 'Publishing', glyph: '◈', component: Publishing },
+  monitor: { title: 'Monitor', glyph: '◉', component: Monitor },
 };
 const DEFAULT_KEY = 'status';
 

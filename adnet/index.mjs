@@ -18,6 +18,7 @@
 //   headline-<id>.json   a headline
 //   creative-<id>.json   the public URL an image was published at (id = its files entry)
 //   entry-<id>.json      an image — compose('files'), the files plugin verbatim
+//   site-<id>.json       a site the session follows on the Monitor page ({domain})
 //
 // Every record is {id, epoch, iv, ciphertext}. There is no plaintext branch.
 //
@@ -33,7 +34,7 @@ import { readFileSync } from 'node:fs';
 // This plugin's version, from its manifest — never restated as a literal.
 const { version: VERSION } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-const KINDS = new Set(['campaign', 'link', 'headline', 'creative']);
+const KINDS = new Set(['campaign', 'link', 'headline', 'creative', 'site']);
 const ID_RE = /^[0-9a-f]{8,48}$/;
 const fileOf = (kind, id) => `${kind}-${id}.json`;
 
