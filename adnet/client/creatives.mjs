@@ -23,6 +23,10 @@ export async function creativeUrl(ctx, records, entry) {
   const up = await ctx.io.uploadBlob(opened.blob);
   const url = new URL(up.url, location.origin).href;
 
-  await records.put('creative', { id: entry.id, url, name: entry.name, mime: entry.mime, publishedAt: new Date().toISOString() });
+  // Name the published URL in the clear (`uploads`) so the relay's orphan sweep keeps
+  // the blob. A sealed-only reference is invisible to the sweep, which then reclaims the
+  // creative ~24h after upload (the broken-image bug). The creative is public, so its
+  // URL is not secret.
+  await records.put('creative', { id: entry.id, url, name: entry.name, mime: entry.mime, publishedAt: new Date().toISOString() }, { uploads: [url] });
   return url;
 }

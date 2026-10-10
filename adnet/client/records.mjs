@@ -36,11 +36,20 @@ export function recordsFor(ctx) {
       return record ? open(record) : null;
     },
 
-    async put(kind, record) {
+    // `opts.uploads` (optional): cleartext /upload URLs this record references. They are
+    // written UNSEALED beside the sealed body so the relay's orphan sweep — which counts
+    // a blob as referenced only when its URL appears in a record's CLEARTEXT
+    // (sealed-shape.mjs / sweepUploadOrphans) — does not reclaim it. A sealed-only
+    // reference is invisible to the sweep and the blob is deleted ~24h after upload
+    // (this is why published creatives vanished). The creative is public bytes, so
+    // naming its URL in the clear leaks nothing — the same shape a files entry uses.
+    async put(kind, record, { uploads } = {}) {
       if (!ctx.keys.ready) throw new Error("This device doesn't hold this session's key yet.");
       const { id, ...body } = record;
       const sealed = await ctx.keys.seal(JSON.stringify(body));   // { epoch, iv, ciphertext }
-      await ctx.io.storage.writeJSON(`${kind}-${id}.json`, { id, ...sealed });
+      const envelope = { id, ...sealed };
+      if (Array.isArray(uploads) && uploads.length) envelope.uploads = uploads;
+      await ctx.io.storage.writeJSON(`${kind}-${id}.json`, envelope);
       return record;
     },
 
