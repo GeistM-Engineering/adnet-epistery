@@ -11,9 +11,24 @@
 
 const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
+// A published creative is reusable only while the relay still serves its bytes.
+// A pre-fix (sealed-only) creative the orphan sweep reclaimed will 404 here — we
+// then re-publish instead of handing a dead URL to the factory.
+async function stillServes(url) {
+  try {
+    const r = await fetch(url, { method: 'GET', cache: 'no-store' });
+    try { r.body?.cancel?.(); } catch { /* ignore */ }
+    return r.ok;
+  } catch { return false; }
+}
+
 export async function creativeUrl(ctx, records, entry) {
   const known = await records.get('creative', entry.id);
-  if (known?.url) return known.url;
+  // Reuse the remembered URL only if it still serves. If it was reclaimed (a
+  // pre-fix sealed-only creative the sweep deleted), fall through and re-publish —
+  // this HEALS an already-broken campaign on a plain redeploy, writing the
+  // cleartext `uploads` tag below so it is kept thereafter.
+  if (known?.url && await stillServes(known.url)) return known.url;
 
   if (!IMAGE_MIMES.has(entry.mime)) throw new Error(`"${entry.name}" is ${entry.mime || 'untyped'}; a creative must be JPEG, PNG, GIF or WebP`);
   const r = await fetch(ctx.io.resolveRelayUrl?.(entry.url) || entry.url);
