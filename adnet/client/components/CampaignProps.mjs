@@ -72,7 +72,22 @@ export default class CampaignProps extends Component {
     const { context } = this;
     const { ctx } = context;
     if (this.isNew) {
-      this.campaign = { name: '', status: 'ACTIVE', budget: 0, pacing: null, settlementRule: 'open', attributes: {}, images: [], headlines: [], links: [], contractAddress: null };
+      // A Copy seeds the new draft from another campaign (content only — never its
+      // contract/deploy state). The name is permanent and part of every link, so it
+      // is pre-filled as "<name>-copy" for the operator to accept or change.
+      const seed = context.copyFrom; context.copyFrom = null;
+      this.campaign = {
+        name: seed ? `${seed.name}-copy` : '',
+        status: seed?.status || 'ACTIVE',
+        budget: seed?.budget ?? 0,
+        pacing: seed?.pacing ?? null,
+        settlementRule: seed?.settlementRule || 'open',
+        attributes: { ...(seed?.attributes || {}) },
+        images: [...(seed?.images || [])],
+        headlines: [...(seed?.headlines || [])],
+        links: [...(seed?.links || [])],
+        contractAddress: null,
+      };
     } else {
       try { this.campaign = await context.records.get('campaign', this.id); }
       catch (e) { this.element.innerHTML = `<p class="empty">Failed to load campaign: ${esc(e.message)}</p>`; return; }
@@ -134,6 +149,7 @@ export default class CampaignProps extends Component {
         await this.draw(Button, { title: 'Withdraw', onClick: () => this.withdraw() }, this.controls);
       }
     }
+    if (edit && !this.isNew) await this.draw(Button, { title: 'Copy', onClick: () => this.copy() }, this.controls);
     if (edit && !this.isNew) await this.draw(Button, { title: 'Delete', variant: 'danger', onClick: () => this.remove() }, this.controls);
 
     if (!this.isNew) {
@@ -531,6 +547,27 @@ export default class CampaignProps extends Component {
       b.append(btn);
       this.opSlot.append(b);
     }
+  }
+
+  // Copy this campaign into a fresh draft — the analyst's revise primitive: reuse the
+  // creatives, headlines, links and settings, change what you need, deploy anew. Nothing
+  // of the contract/deploy comes along; a deployed campaign is immutable, so "revise" is
+  // Withdraw the old + Copy + Deploy. The new draft opens in the editor to be named
+  // (names are permanent) and deployed.
+  copy() {
+    const c = this.campaign;
+    this.context.copyFrom = {
+      name: c.name,
+      status: c.status || 'ACTIVE',
+      budget: c.budget ?? 0,
+      pacing: c.pacing ?? null,
+      settlementRule: c.settlementRule || 'open',
+      attributes: { ...(c.attributes || {}) },
+      images: [...(c.images || [])],
+      headlines: [...(c.headlines || [])],
+      links: [...(c.links || [])],
+    };
+    this.context.go('campaigns/new');
   }
 
   async remove() {
