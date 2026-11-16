@@ -39,6 +39,13 @@ export function factoryFor(ctx) {
       catch { return null; }
     },
 
+    // The network ledger — value delivered / paid / unrealized across every deployed
+    // campaign, with per-campaign rows and a daily timeline. Read-only, like report.
+    async network() {
+      try { const r = await call(`${base}/publish/network`); return r.ok ? r.body.network || null : null; }
+      catch { return null; }
+    },
+
     async events(id) {
       const r = await call(campaignUrl(id, '/events'));
       if (!r.ok) throw refusal('read campaign events', r);

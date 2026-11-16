@@ -16,6 +16,21 @@ export const polToWei = (pol) => BigInt(Math.round(Number(pol) * 1e6)) * 10n ** 
 
 export const fmtPol = (n, digits = 4) => (n == null ? '—' : `${Number(n).toFixed(digits)} POL`);
 
+// A campaign's serving state (from the factory's economics) → label + badge class.
+// The factory is the one authority on the state; this only names it for a human.
+export const CAMPAIGN_STATE = {
+  serving:   { label: 'Serving',   cls: 'state-serving' },
+  exhausted: { label: 'Exhausted', cls: 'state-exhausted' },
+  unfunded:  { label: 'Unfunded',  cls: 'state-unfunded' },
+  paused:    { label: 'Paused',    cls: 'state-paused' },
+};
+export const stateBadge = (state) => CAMPAIGN_STATE[state] || { label: state || 'unknown', cls: '' };
+
+// Label a POL amount with its USD value, when a price is known: `$1.23`, or '' when
+// the price is unavailable. Display only — pair it with fmtPol, never replace it.
+export const fmtUsd = (pol, price, digits = 2) =>
+  (price == null || pol == null ? '' : `$${(Number(pol) * price).toFixed(digits)}`);
+
 // The market price of POL, for labelling an amount. Display only — the console's
 // own figure, and absent (null) when the source is unreachable. Cached per page.
 let _price = null;

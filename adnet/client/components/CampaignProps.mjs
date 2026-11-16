@@ -22,7 +22,7 @@ import ImagePicker from './ImagePicker.mjs';
 import HeadlinePicker from './HeadlinePicker.mjs';
 import LinkPicker from './LinkPicker.mjs';
 import CampaignReport from './CampaignReport.mjs';
-import { esc, shortAddr, weiToPol, polToWei, fmtPol, polUsd } from '../util.mjs';
+import { esc, shortAddr, weiToPol, polToWei, fmtPol, polUsd, stateBadge, fmtUsd } from '../util.mjs';
 import { newId } from '../records.mjs';
 import { mintShortCode } from './Links.mjs';
 import { creativeUrl } from '../creatives.mjs';
@@ -57,6 +57,26 @@ export default class CampaignProps extends Component {
 .CampaignProps .field-note strong { color: var(--text-color); font-family: ui-monospace, monospace; }
 .CampaignProps .field-readonly label { display: block; font-size: 0.85em; color: var(--text-muted); margin-bottom: var(--spacerhalf); }
 .CampaignProps .field-readonly .ro-value { padding: var(--spacerhalf) var(--spacer); background: var(--steel-50); border-radius: 4px; }
+.CampaignProps .money { display: flex; flex-wrap: wrap; gap: var(--spacer2); align-items: stretch; }
+.CampaignProps .money-budget { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: var(--spacer); }
+.CampaignProps .money-burn { height: 8px; border-radius: 999px; background: var(--steel-50); overflow: hidden; }
+.CampaignProps .money-burn span { display: block; height: 100%; background: var(--primary-mid); border-radius: 999px; }
+.CampaignProps .mb-rows { display: flex; flex-direction: column; gap: var(--spacerhalf); }
+.CampaignProps .mb-row { display: flex; align-items: baseline; gap: var(--spacer); font-size: 0.95em; }
+.CampaignProps .mb-row .mb-k { flex: 0 0 76px; color: var(--text-muted); font-size: 0.85em; }
+.CampaignProps .mb-row b { font-variant-numeric: tabular-nums; }
+.CampaignProps .money-usd { color: var(--text-muted); font-size: 0.85em; }
+.CampaignProps .mb-pct { margin-left: auto; color: var(--text-muted); font-size: 0.85em; }
+.CampaignProps .money-ledger { flex: 2 1 320px; min-width: 0; display: flex; gap: var(--spacer); }
+.CampaignProps .money-tile { flex: 1 1 0; min-width: 0; border: 1px solid var(--page-border); border-radius: 8px; padding: var(--spacer); background: var(--steel-50); display: flex; flex-direction: column; gap: 2px; }
+.CampaignProps .money-tile .mt-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.CampaignProps .money-tile .mt-val { font-size: 1.3em; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.CampaignProps .money-tile .mt-usd { color: var(--text-muted); font-size: 0.85em; }
+.CampaignProps .money-tile .mt-hint { font-size: 0.75em; color: var(--text-muted); margin-top: var(--spacerhalf); }
+.CampaignProps .money-tile.is-unrealized { border-color: color-mix(in srgb, var(--adnet-warn) 45%, var(--page-border)); background: color-mix(in srgb, var(--adnet-warn) 8%, transparent); }
+.CampaignProps .money-tile.is-unrealized .mt-val { color: var(--adnet-warn); }
+.CampaignProps .money-note { margin-top: var(--spacer); font-size: 0.85em; color: var(--text-muted); }
+.CampaignProps .money-note b { color: var(--text-color); font-variant-numeric: tabular-nums; }
 `;
 
   constructor(props) {
@@ -126,10 +146,15 @@ export default class CampaignProps extends Component {
     } else {
       title.innerHTML = `<h1 class="campaign-name">${esc(c.name)}</h1>`;
       const meta = this.div('detail-meta', title);
+      // The serving state the budget gate actually enforces (factory economics),
+      // so a drained-but-active campaign reads `Exhausted`, not just `Deployed`.
+      const sb = this.report?.economics ? stateBadge(this.report.economics.state) : null;
+      const stateHtml = deployed && c.retired ? '<span class="badge">Retired</span>'
+        : sb ? `<span class="badge ${sb.cls}">${sb.label}</span>`
+        : this._unfunded() ? '<span class="badge state-unfunded">Unfunded</span>' : '';
       meta.innerHTML = `
         <span class="badge ${deployed ? 'deployed' : 'draft'}">${deployed ? 'Deployed' : 'Draft'}</span>
-        ${this._unfunded() ? '<span class="badge draft">Unfunded</span>' : ''}
-        ${deployed && c.active === false ? `<span class="badge">${c.retired ? 'Retired' : 'Disabled'}</span>` : ''}
+        ${stateHtml}
         <span>Created ${c._created ? esc(new Date(c._created).toLocaleString()) : '-'}</span>
         ${deployed ? `<span class="mono">${esc(c.contractAddress)}</span>` : ''}`;
     }
@@ -156,6 +181,10 @@ export default class CampaignProps extends Component {
       this.opSlot = this.div('op-banner-slot');
       this._renderStanding();
     }
+
+    // Money — funded/spent/remaining and the value delivered / paid / unrealized, so
+    // the page SHOWS when a campaign is exhausted instead of just looking funded.
+    if (deployed) await this._renderMoney();
 
     // --- Campaign configuration ---
     const cfg = this._section('Campaign configuration');
@@ -197,6 +226,51 @@ export default class CampaignProps extends Component {
     const section = this.div('section');
     this.div('section-title', section).textContent = text;
     return this.div('section-panel', section);
+  }
+
+  // The money panel — budget burn and the value ledger (delivered / paid / unrealized),
+  // read from the factory's own economics. All figures are the contract's and the
+  // event log's; this only shows them. USD is a display label (null price = POL only).
+  async _renderMoney() {
+    const econ = this.report?.economics;
+    if (!econ) return;
+    const price = await polUsd();
+    const usd = (p) => { const s = fmtUsd(p, price); return s ? `<span class="money-usd">${s}</span>` : ''; };
+    const burn = econ.budget > 0 ? Math.min(100, Math.round((econ.spent / econ.budget) * 100)) : 0;
+
+    const sec = this._section('Performance & budget');
+    this.div('money', sec).innerHTML = `
+      <div class="money-budget">
+        <div class="money-burn" title="${burn}% of the stake spent"><span style="width:${burn}%"></span></div>
+        <div class="mb-rows">
+          <div class="mb-row"><span class="mb-k">Funded</span><b>${fmtPol(econ.budget, 3)}</b>${usd(econ.budget)}</div>
+          <div class="mb-row"><span class="mb-k">Spent</span><b>${fmtPol(econ.spent, 3)}</b>${usd(econ.spent)}<span class="mb-pct">${burn}%</span></div>
+          <div class="mb-row"><span class="mb-k">Remaining</span><b>${fmtPol(econ.remaining, 3)}</b>${usd(econ.remaining)}</div>
+        </div>
+      </div>
+      <div class="money-ledger">
+        ${this._moneyTile('Delivered', econ.deliveredValue, price, 'Value of everything served')}
+        ${this._moneyTile('Paid out', econ.paidValue, price, 'Settled and paid to publishers on chain')}
+        ${this._moneyTile('Unrealized', econ.unrealized, price, 'Earned by publishers, not yet paid — settles as they key in and budget is added', 'is-unrealized')}
+      </div>`;
+
+    if (econ.state === 'exhausted') {
+      this.div('money-note', sec).innerHTML =
+        `Out of on-chain budget: this campaign delivered more than its stake covers and has stopped serving. `
+        + `Add budget to resume and to settle the <b>${fmtPol(econ.unrealized, 2)}</b> its publishers have already earned.`;
+    } else if (econ.state === 'unfunded') {
+      this.div('money-note', sec).innerHTML = 'Deployed but not staked — add budget to start serving.';
+    }
+  }
+
+  _moneyTile(label, pol, price, hint, cls = '') {
+    const u = fmtUsd(pol, price);
+    return `<div class="money-tile ${cls}">`
+      + `<span class="mt-label">${esc(label)}</span>`
+      + `<b class="mt-val">${fmtPol(pol, 2)}</b>`
+      + (u ? `<span class="mt-usd">${u}</span>` : '')
+      + `<span class="mt-hint">${esc(hint)}</span>`
+      + `</div>`;
   }
 
   // Deployed, not retired, and the contract holds no budget yet. Read from the

@@ -19,11 +19,13 @@ import FilesPane from './FilesPane.mjs';
 import Settings from './Settings.mjs';
 import Publishing from './Publishing.mjs';
 import Monitor from './Monitor.mjs';
+import Network from './Network.mjs';
 import { recordsFor } from '../records.mjs';
 import { factoryFor } from '../factory.mjs';
 
 const PAGES = {
   status: { title: 'Status', glyph: '◎', component: Status },
+  network: { title: 'Network', glyph: '◆', component: Network },
   campaigns: { title: 'Campaigns', glyph: '▤', component: Campaigns },
   headlines: { title: 'Headlines', glyph: '❝', component: Headlines },
   links: { title: 'Links', glyph: '↗', component: Links },

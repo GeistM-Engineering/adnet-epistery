@@ -116,6 +116,13 @@
 }
 @keyframes adnet-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
+/* Serving state — the honest money status derived in the factory (services/economics.mjs),
+   so a funded-but-drained campaign reads `Exhausted`, not `Deployed`. */
+.plugin-adnet .badge.state-serving { background: color-mix(in srgb, var(--adnet-good) 16%, transparent); color: var(--adnet-good); }
+.plugin-adnet .badge.state-exhausted { background: color-mix(in srgb, var(--adnet-bad) 16%, transparent); color: var(--adnet-bad); }
+.plugin-adnet .badge.state-unfunded { background: color-mix(in srgb, var(--adnet-warn) 16%, transparent); color: var(--adnet-warn); }
+.plugin-adnet .badge.state-paused { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
+
 .plugin-adnet .tx-type {
   display: inline-block;
   padding: 0 var(--spacerhalf);
