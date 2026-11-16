@@ -169,6 +169,10 @@ export default class CampaignProps extends Component {
       const isActive = c.active !== false;
       await this.draw(Button, { title: isActive ? 'Disable' : 'Enable', onClick: () => this.setActive(!isActive) }, this.controls);
       await this.draw(Button, { title: 'Settle', onClick: () => this.settle() }, this.controls);
+      // A backlog the budget can't cover: offer to write it off so a top-up serves forward.
+      if (this.report?.economics?.owed > 0) {
+        await this.draw(Button, { title: 'Write off backlog', onClick: () => this.writeOff() }, this.controls);
+      }
       if (this.payer) {
         await this.draw(Button, { title: 'Add budget', onClick: () => this.addBudget() }, this.controls);
         await this.draw(Button, { title: 'Withdraw', onClick: () => this.withdraw() }, this.controls);
@@ -255,11 +259,16 @@ export default class CampaignProps extends Component {
       </div>`;
 
     if (econ.state === 'exhausted') {
-      this.div('money-note', sec).innerHTML =
-        `Out of on-chain budget: this campaign delivered more than its stake covers and has stopped serving. `
-        + `Add budget to resume and to settle the <b>${fmtPol(econ.unrealized, 2)}</b> its publishers have already earned.`;
+      this.div('money-note', sec).innerHTML = econ.owed > 0
+        ? `Out of on-chain budget: this campaign delivered more than its stake covers and has stopped serving. `
+          + `Write off its <b>${fmtPol(econ.owed, 2)}</b> backlog so added budget serves forward, or add budget to settle it.`
+        : `Out of on-chain budget — add budget to serve forward. `
+          + `Its <b>${fmtPol(econ.writtenOffValue, 2)}</b> written-off backlog stays on record as unrealized payout.`;
     } else if (econ.state === 'unfunded') {
       this.div('money-note', sec).innerHTML = 'Deployed but not staked — add budget to start serving.';
+    } else if (econ.writtenOffValue > 0) {
+      this.div('money-note', sec).innerHTML =
+        `Serving. <b>${fmtPol(econ.writtenOffValue, 2)}</b> of earlier delivery is written off — on record as unrealized payout, no longer charged to budget.`;
     }
   }
 
@@ -461,6 +470,19 @@ export default class CampaignProps extends Component {
       });
   }
 
+  writeOff() {
+    const c = this.campaign;
+    const owed = this.report?.economics?.owed || 0;
+    return this._confirmThen('Write off',
+      `Write off this campaign's backlog of ${fmtPol(owed, 2)}? The delivery is kept as a record of unrealized payout — it still shows as earned — but it stops counting against the budget, so budget you add afterward serves forward instead of paying it down. This cannot be undone.`,
+      async (step) => {
+        step('signing');
+        const auth = await factoryAuth();
+        step('writing off the backlog through the factory');
+        const w = await this.context.factory.writeOff(auth, c.factoryCampaignId);
+        return `Backlog written off: ${w.views || 0} views / ${w.clicks || 0} clicks kept as unrealized payout. Add budget to serve forward.`;
+      });
+  }
   settle() {
     const c = this.campaign;
     return this._confirmThen('Settle',

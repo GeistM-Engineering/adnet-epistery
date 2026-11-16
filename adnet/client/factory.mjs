@@ -69,5 +69,13 @@ export function factoryFor(ctx) {
       if (!r.ok || r.body.status !== 'success') throw refusal('settle the campaign', r);
       return r.body.summary || {};
     },
+
+    // Write off the pending backlog — kept as a record of unrealized payout, dropped
+    // from the live liability so budget added afterward serves forward. Off-chain.
+    async writeOff(auth, id) {
+      const r = await call(campaignUrl(id, '/writeoff'), { method: 'POST', auth });
+      if (!r.ok || r.body.status !== 'success') throw refusal('write off the backlog', r);
+      return r.body.writtenOff || {};
+    },
   };
 }
