@@ -27,6 +27,7 @@ export default class CampaignReport extends Component {
 .CampaignReport .report-ctx-col h5 { margin: 0 0 var(--spacerhalf); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
 .CampaignReport .ctx-row { display: flex; justify-content: space-between; gap: var(--spacer); font-size: 0.9em; }
 .CampaignReport .rt-tag { font-size: 0.75em; color: var(--text-muted); }
+.CampaignReport .rt-addr { font-size: 0.85em; }
 `;
 
   async render(element) {
@@ -48,8 +49,12 @@ export default class CampaignReport extends Component {
 
     this.div('report-chart').innerHTML = this._chart(d.series);
 
-    this.div('report-block').innerHTML = '<h4>Publishers</h4>' + this._table(['Domain', 'Views', 'Clicks'],
-      (d.byPublisher || []).map((p) => [esc(p.domain) + (p.rung ? ` <span class="rt-tag">${esc(p.rung)}</span>` : ''), { n: p.views }, { n: p.clicks }]));
+    this.div('report-block').innerHTML = '<h4>Publishers</h4>' + this._table(['Domain', 'Address', 'Views', 'Clicks'],
+      (d.byPublisher || []).map((p) => [
+        esc(p.domain) + (p.rung ? ` <span class="rt-tag">${esc(p.rung)}</span>` : ''),
+        this._publisherAddress(p),
+        { n: p.views }, { n: p.clicks },
+      ]));
 
     this.div('report-block').innerHTML = '<h4>Context</h4><div class="report-ctx">'
       + this._breakdown('Device', d.byDevice) + this._breakdown('Browser', d.byBrowser) + '</div>';
@@ -82,6 +87,19 @@ export default class CampaignReport extends Component {
     });
     return `<svg class="report-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>`
       + '<div class="report-legend"><span><i class="views"></i>views</span><span><i class="clicks"></i>clicks</span></div>';
+  }
+
+  // The payee address we know for a publisher, or "none" when it hasn't declared
+  // one. The address is meaningless without its chain, so it links to the explorer
+  // for the network the publisher declared (defaulting to Polygon mainnet, where
+  // the Adnet settles) and flags any non-mainnet network inline.
+  _publisherAddress(p) {
+    if (!p.address) return '<span class="rt-tag">none</span>';
+    const net = (p.network && Number(p.network.chainId)) ? p.network : { name: 'polygon', chainId: 137 };
+    const explorer = net.chainId === 80002 ? 'https://amoy.polygonscan.com/address/' : 'https://polygonscan.com/address/';
+    const short = esc(`${p.address.slice(0, 6)}…${p.address.slice(-4)}`);
+    const tag = (net.name && net.name !== 'polygon') ? ` <span class="rt-tag">${esc(net.name)}</span>` : '';
+    return `<a class="mono rt-addr" href="${explorer}${esc(p.address)}" target="_blank" rel="noopener" title="${esc(p.address)}">${short}</a>${tag}`;
   }
 
   _breakdown(title, obj) {
