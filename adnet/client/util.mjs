@@ -9,6 +9,13 @@ export function esc(text) {
 
 export const shortAddr = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '');
 
+// The id the factory knows a campaign by. Deploy creates the contract with
+// `campaignId: name` (CampaignProps.deploy), so the factory's id IS the campaign
+// name; `factoryCampaignId` is only cached on records deployed through the current
+// console. Older or copied records lack it — fall back to the name so reports,
+// events and actions resolve instead of 404ing to a row of "—".
+export const campaignKey = (c) => (c && (c.factoryCampaignId || c.name || c.id)) || undefined;
+
 export const weiToPol = (wei) => (wei == null ? null : Number(BigInt(wei)) / 1e18);
 
 // POL → wei at micro-POL precision; exact enough for a budget and free of floats past 1e-6.

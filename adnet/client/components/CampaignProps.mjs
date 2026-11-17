@@ -22,7 +22,7 @@ import ImagePicker from './ImagePicker.mjs';
 import HeadlinePicker from './HeadlinePicker.mjs';
 import LinkPicker from './LinkPicker.mjs';
 import CampaignReport from './CampaignReport.mjs';
-import { esc, shortAddr, weiToPol, polToWei, fmtPol, polUsd, stateBadge, fmtUsd } from '../util.mjs';
+import { esc, shortAddr, weiToPol, polToWei, fmtPol, polUsd, stateBadge, fmtUsd, campaignKey } from '../util.mjs';
 import { newId } from '../records.mjs';
 import { mintShortCode } from './Links.mjs';
 import { creativeUrl } from '../creatives.mjs';
@@ -133,7 +133,7 @@ export default class CampaignProps extends Component {
     const edit = context.canEdit;
     this.payer = deployed ? await canPay(ctx) : false;
     // Whether the budget is staked is the CONTRACT's to say, not this record's.
-    this.report = deployed ? await context.factory.report(c.factoryCampaignId) : null;
+    this.report = deployed ? await context.factory.report(campaignKey(c)) : null;
 
     // --- header ---
     const header = this.div('detail-header');
@@ -463,7 +463,7 @@ export default class CampaignProps extends Component {
         step('signing');
         const auth = await factoryAuth();
         step(`${active ? 'unpausing' : 'pausing'} the contract through the factory`);
-        await this.context.factory.setActive(auth, c.factoryCampaignId, active);
+        await this.context.factory.setActive(auth, campaignKey(c), active);
         c.active = active;
         await this.context.records.put('campaign', c);
         return active ? 'Enabled — serving to publishers.' : 'Disabled — pulled from rotation (stays deployed).';
@@ -479,7 +479,7 @@ export default class CampaignProps extends Component {
         step('signing');
         const auth = await factoryAuth();
         step('writing off the backlog through the factory');
-        const w = await this.context.factory.writeOff(auth, c.factoryCampaignId);
+        const w = await this.context.factory.writeOff(auth, campaignKey(c));
         return `Backlog written off: ${w.views || 0} views / ${w.clicks || 0} clicks kept as unrealized payout. Add budget to serve forward.`;
       });
   }
@@ -491,7 +491,7 @@ export default class CampaignProps extends Component {
         step('signing');
         const auth = await factoryAuth();
         step('settling on chain through the factory');
-        const s = await this.context.factory.settle(auth, c.factoryCampaignId);
+        const s = await this.context.factory.settle(auth, campaignKey(c));
         const paid = (s.settled?.views || 0) + (s.settled?.clicks || 0);
         return paid
           ? `Settled ${s.settled.batches} batch(es): ${s.settled.views} views / ${s.settled.clicks} clicks paid` + (s.denied ? `, ${s.denied} denied` : '') + (s.spam ? `, ${s.spam} spam` : '')

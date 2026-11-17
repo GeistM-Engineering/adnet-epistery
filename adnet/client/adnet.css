@@ -128,7 +128,10 @@
   padding: 0 var(--spacerhalf);
   border-radius: 4px;
   font-size: 0.85em;
-  background: var(--adnet-quiet-bg);
+  /* Theme-mixed neutral + an explicit text colour (like .badge), so the badge
+     flips with light/dark instead of inheriting and going dark-on-dark. */
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color: var(--text-muted);
 }
 .plugin-adnet .tx-type.is-click { background: color-mix(in srgb, var(--adnet-good) 16%, transparent); color: var(--adnet-good); }
 .plugin-adnet .tx-type.is-view { background: color-mix(in srgb, var(--adnet-busy) 16%, transparent); color: var(--adnet-busy); }

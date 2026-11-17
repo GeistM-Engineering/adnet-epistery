@@ -4,7 +4,7 @@
 // from blackfire-agent's CampaignReport.
 
 import Component from '/lib/componentry.mjs';
-import { esc } from '../util.mjs';
+import { esc, campaignKey } from '../util.mjs';
 
 export default class CampaignReport extends Component {
   static css = `
@@ -32,7 +32,7 @@ export default class CampaignReport extends Component {
   async render(element) {
     await super.render(element);
     let d;
-    try { d = await this.props.context.factory.events(this.props.campaign.factoryCampaignId); }
+    try { d = await this.props.context.factory.events(campaignKey(this.props.campaign)); }
     catch (e) { this.element.innerHTML = `<p class="empty">Failed to load data: ${esc(e.message)}</p>`; return; }
     if (!d || d.status !== 'success') { this.element.innerHTML = `<p class="empty">${esc(d?.error || 'No data yet.')}</p>`; return; }
     if (!d.totals?.views && !d.totals?.clicks) { this.element.innerHTML = '<p class="empty">No views or clicks recorded yet.</p>'; return; }

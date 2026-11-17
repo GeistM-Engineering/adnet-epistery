@@ -5,7 +5,7 @@
 // Adapted from blackfire-agent's Status.
 
 import Component from '/lib/componentry.mjs';
-import { esc, shortAddr, fmtPol, weiToPol, polUsd, failureNote } from '../util.mjs';
+import { esc, shortAddr, fmtPol, weiToPol, polUsd, failureNote, campaignKey } from '../util.mjs';
 import { treasury, explorer } from '../signer.mjs';
 
 const num = (v) => Number(v) || 0;
@@ -41,7 +41,7 @@ export default class Status extends Component {
     } catch (e) { this.element.innerHTML = failureNote(e, 'load the overview'); return; }
     const deployed = campaigns.filter((c) => c.contractAddress);
     const [reports, price, x, tre] = await Promise.all([
-      Promise.all(deployed.map((c) => factory.report(c.factoryCampaignId))),
+      Promise.all(deployed.map((c) => factory.report(campaignKey(c)))),
       polUsd(),
       explorer(),
       treasury(ctx).catch(() => null),
