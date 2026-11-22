@@ -5,7 +5,7 @@
 // Adapted from blackfire-agent's Status.
 
 import Component from '/lib/componentry.mjs';
-import { esc, shortAddr, fmtPol, weiToPol, polUsd, failureNote, campaignKey } from '../util.mjs';
+import { esc, shortAddr, fmtPol, weiToPol, polUsd, failureNote, stateBadge } from '../util.mjs';
 import { treasury, explorer } from '../signer.mjs';
 
 const num = (v) => Number(v) || 0;
@@ -35,26 +35,28 @@ export default class Status extends Component {
     const { ctx, records, factory } = context;
     const owner = ctx.session.owner;
 
+    // Local, fast: the sealed records this device already holds. Everything that
+    // can be drawn from them is painted NOW; the chain figures fill in after.
     let campaigns, links, headlines;
     try {
       [campaigns, links, headlines] = await Promise.all([records.list('campaign'), records.list('link'), records.list('headline')]);
     } catch (e) { this.element.innerHTML = failureNote(e, 'load the overview'); return; }
     const deployed = campaigns.filter((c) => c.contractAddress);
-    const [reports, price, x, tre] = await Promise.all([
-      Promise.all(deployed.map((c) => factory.report(campaignKey(c)))),
-      polUsd(),
-      explorer(),
-      treasury(ctx).catch(() => null),
-    ]);
+
+    // Cheap, non-chain: the price gloss (a cached fetch) and the explorer base (a
+    // config read). The slow reads — the identity's balance and every campaign's
+    // economics — are deferred below so the overview paints immediately.
+    const [price, x] = await Promise.all([polUsd(), explorer()]);
     const usd = (p) => (price != null && p != null ? ` <span class="usd">($${(p * price).toFixed(2)})</span>` : '');
     const addr = (a) => `<a href="${esc(x.address(a))}" target="_blank" rel="noopener" class="mono">${shortAddr(a)}</a>`;
 
-    // --- the treasury: the one balance that stakes every campaign ---
+    // --- the treasury: the one balance that stakes every campaign (filled after) ---
     const stats = this.div('stats');
-    const remaining = reports.reduce((a, r) => a + (r ? num(r.remaining) : 0), 0);
-    this.div('stat', stats).innerHTML = `<div class="stat-value">${fmtPol(tre?.pol)}${usd(tre?.pol)}</div>
+    const treTile = this.div('stat', stats);
+    const stakedTile = this.div('stat', stats);
+    treTile.innerHTML = `<div class="stat-value">…</div>
       <div class="stat-label">Identity treasury · ${addr(owner)}</div>`;
-    this.div('stat', stats).innerHTML = `<div class="stat-value">${fmtPol(remaining)}${usd(remaining)}</div>
+    stakedTile.innerHTML = `<div class="stat-value">…</div>
       <div class="stat-label">Staked and unspent across campaigns</div>`;
 
     const chips = this.div('chips');
@@ -62,43 +64,25 @@ export default class Status extends Component {
       this.div('chip', chips).innerHTML = `<span class="chip-value">${value}</span> <span class="chip-label">${label}</span>`;
     }
 
-    // --- deployed campaigns ---
+    // --- deployed campaigns: names / rule / contract now; economics fill in ---
     const camps = this.div('panel');
     if (!deployed.length) {
       camps.innerHTML = '<h2>Campaigns</h2><p class="empty">No deployed campaigns yet.</p>';
     } else {
-      // Delivered with the settled subset beside it: "12 · 8 ✓". A muted "0 ✓" is
-      // exactly what an advertiser needs to notice — delivered, unpaid.
-      const vc = (d, st) => (d == null ? '—' : st == null ? `${d}` : `${d} <span class="settled${st > 0 ? '' : ' settled-none'}">${st}&nbsp;✓</span>`);
-      const rows = deployed.map((c, i) => {
-        const r = reports[i];
-        // Unfunded is the contract's to say: no budget staked yet.
-        const unfunded = r ? num(r.budget) === 0 : !!(c.fundingTargetWei && !c.fundedTxHash);
-        const active = r ? r.active : c.active !== false;
-        let badge = '<span class="badge">Paused</span>';
-        if (c.retired) badge = '<span class="badge">Retired</span>';
-        else if (unfunded) badge = '<span class="badge draft">Unfunded</span>';
-        else if (active) badge = '<span class="badge deployed">Active</span>';
-        const denied = r?.denied ? num(r.denied.views) + num(r.denied.clicks) : 0;
-        const flags = [];
-        if (denied) flags.push(`<span class="flag denied" title="flushed but not paid — failed the campaign rule or unattributable">${denied} denied</span>`);
-        if (r?.spam) flags.push(`<span class="flag" title="dropped at the doorstep">${num(r.spam)} spam</span>`);
-        return `<tr>
-          <td><a data-go="campaigns/${esc(c.id)}">${esc(c.name)}</a>${flags.length ? `<div class="row-flags">${flags.join('')}</div>` : ''}</td>
-          <td>${badge}</td>
-          <td class="rule mono" title="declared payment rule">${esc(c.settlementRule || 'open')}</td>
-          <td class="num">${fmtPol(r ? num(r.budget) : null)}</td>
-          <td class="num">${fmtPol(r ? num(r.spent) : null)}</td>
-          <td class="num"><strong>${fmtPol(r ? num(r.remaining) : null)}</strong></td>
-          <td class="num">${vc(r?.delivered ? num(r.delivered.views) : null, r?.settled ? num(r.settled.views) : null)}</td>
-          <td class="num">${vc(r?.delivered ? num(r.delivered.clicks) : null, r?.settled ? num(r.settled.clicks) : null)}</td>
-          <td>${addr(c.contractAddress)}</td>
-        </tr>`;
-      }).join('');
       camps.innerHTML = `<h2>Campaigns</h2>
         <div class="table-box"><table class="adnet-table">
           <thead><tr><th>Campaign</th><th>Status</th><th>Rule</th><th>Budget</th><th>Spent</th><th>Available</th><th>Views</th><th>Clicks</th><th>Contract</th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${deployed.map((c) => `<tr data-cid="${esc(c.id)}">
+            <td><a data-go="campaigns/${esc(c.id)}">${esc(c.name)}</a></td>
+            <td class="col-badge"><span class="badge">…</span></td>
+            <td class="rule mono" title="declared payment rule">${esc(c.settlementRule || 'open')}</td>
+            <td class="num col-budget">…</td>
+            <td class="num col-spent">…</td>
+            <td class="num col-remaining"><strong>…</strong></td>
+            <td class="num col-views">…</td>
+            <td class="num col-clicks">…</td>
+            <td>${addr(c.contractAddress)}</td>
+          </tr>`).join('')}</tbody>
         </table></div>
         <p class="table-note">Budget, spent and available are read from each contract. Views / Clicks are <strong>delivered</strong> counts from the factory's contract-anchored event log; <span class="settled">N&nbsp;✓</span> is the <strong>settled</strong> subset paid to publishers.</p>`;
     }
@@ -129,5 +113,46 @@ export default class Status extends Component {
       <p>Campaigns deploy through <span class="mono">${esc(factory.base)}</span> with this session's identity
       <span class="mono">${esc(owner)}</span> as the advertiser. Each is its own contract, staked from the identity's
       treasury on a signer's signature; the balances above are read from those contracts.</p>`;
+
+    // --- the chain reads, OFF the paint path ---
+    // One cached /network call carries every campaign's economics at once — not a
+    // /report per campaign. That fan-out (N uncached contract reads, issued one
+    // request at a time) is what made this page sit blank on the chain; /network
+    // reads the same contracts in parallel behind a 30s cache. The page is already
+    // interactive — these only fill the money cells when they arrive.
+    const [tre, net] = await Promise.all([
+      treasury(ctx).catch(() => null),
+      factory.network().catch(() => null),
+    ]);
+    if (!this.element?.isConnected) return;   // navigated away before the chain answered
+
+    treTile.innerHTML = `<div class="stat-value">${fmtPol(tre?.pol)}${usd(tre?.pol)}</div>
+      <div class="stat-label">Identity treasury · ${addr(owner)}</div>`;
+    const remaining = net ? num(net.totals?.remaining) : null;
+    stakedTile.innerHTML = `<div class="stat-value">${fmtPol(remaining)}${usd(remaining)}</div>
+      <div class="stat-label">Staked and unspent across campaigns</div>`;
+
+    if (deployed.length) {
+      // contractAddress → the network's per-campaign economics row.
+      const econ = new Map((net?.campaigns || []).map((r) => [String(r.contractAddress || '').toLowerCase(), r]));
+      // Delivered with the settled subset beside it: "12 · 8 ✓". A muted "0 ✓" is
+      // exactly what an advertiser needs to notice — delivered, unpaid.
+      const vc = (d, st) => (d == null ? '—' : st == null ? `${d}` : `${d} <span class="settled${st > 0 ? '' : ' settled-none'}">${st}&nbsp;✓</span>`);
+      for (const c of deployed) {
+        const row = camps.querySelector(`tr[data-cid="${c.id}"]`);
+        if (!row) continue;
+        const r = econ.get(String(c.contractAddress).toLowerCase());
+        // The serving state is the economics owner's to say (serving / exhausted /
+        // unfunded / paused); retired is this record's own.
+        const sb = r ? stateBadge(r.state) : null;
+        row.querySelector('.col-badge').innerHTML = c.retired ? '<span class="badge">Retired</span>'
+          : sb ? `<span class="badge ${sb.cls}">${sb.label}</span>` : '<span class="badge">—</span>';
+        row.querySelector('.col-budget').textContent = fmtPol(r ? num(r.budget) : null);
+        row.querySelector('.col-spent').textContent = fmtPol(r ? num(r.spent) : null);
+        row.querySelector('.col-remaining').innerHTML = `<strong>${fmtPol(r ? num(r.remaining) : null)}</strong>`;
+        row.querySelector('.col-views').innerHTML = vc(r?.delivered ? num(r.delivered.views) : null, r?.settled ? num(r.settled.views) : null);
+        row.querySelector('.col-clicks').innerHTML = vc(r?.delivered ? num(r.delivered.clicks) : null, r?.settled ? num(r.settled.clicks) : null);
+      }
+    }
   }
 }

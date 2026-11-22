@@ -40,6 +40,10 @@ const eqAddr = (a, b) => !!a && !!b && String(a).toLowerCase() === String(b).toL
 export default class CampaignProps extends Component {
   static css = `
 .CampaignProps { display: flex; flex-direction: column; gap: var(--spacer2); min-width: 0; }
+/* Slots that hold a position without being a layout box of their own: their
+   children flow in the parent flex exactly as if drawn inline. Empty = no gap. */
+.CampaignProps .ops-host { display: contents; }
+.CampaignProps .money-slot { display: contents; }
 .CampaignProps .detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--spacer); flex-wrap: wrap; }
 .CampaignProps .detail-title { flex: 1 1 280px; min-width: 0; }
 .CampaignProps .campaign-name { font-size: 1.5rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; margin-bottom: var(--spacerhalf); }
@@ -131,9 +135,12 @@ export default class CampaignProps extends Component {
 
     const deployed = !!c.contractAddress;
     const edit = context.canEdit;
-    this.payer = deployed ? await canPay(ctx) : false;
-    // Whether the budget is staked is the CONTRACT's to say, not this record's.
-    this.report = deployed ? await context.factory.report(campaignKey(c)) : null;
+    // Whether the budget is staked, and the serving economics, are the CONTRACT's to
+    // say — a chain round-trip. The form is all local record, so it paints now;
+    // payer/report are read off the paint path (below) and fill the state badge, the
+    // money panel, the standing banners and the budget buttons when they land.
+    this.payer = false;
+    this.report = null;
 
     // --- header ---
     const header = this.div('detail-header');
@@ -146,17 +153,16 @@ export default class CampaignProps extends Component {
     } else {
       title.innerHTML = `<h1 class="campaign-name">${esc(c.name)}</h1>`;
       const meta = this.div('detail-meta', title);
-      // The serving state the budget gate actually enforces (factory economics),
-      // so a drained-but-active campaign reads `Exhausted`, not just `Deployed`.
-      const sb = this.report?.economics ? stateBadge(this.report.economics.state) : null;
-      const stateHtml = deployed && c.retired ? '<span class="badge">Retired</span>'
-        : sb ? `<span class="badge ${sb.cls}">${sb.label}</span>`
-        : this._unfunded() ? '<span class="badge state-unfunded">Unfunded</span>' : '';
+      // The serving state the budget gate actually enforces (factory economics) fills
+      // into this slot once the contract is read, so a drained-but-active campaign
+      // reads `Exhausted`, not just `Deployed`. Until then the record's own facts show.
       meta.innerHTML = `
         <span class="badge ${deployed ? 'deployed' : 'draft'}">${deployed ? 'Deployed' : 'Draft'}</span>
-        ${stateHtml}
+        <span class="state-slot"></span>
         <span>Created ${c._created ? esc(new Date(c._created).toLocaleString()) : '-'}</span>
         ${deployed ? `<span class="mono">${esc(c.contractAddress)}</span>` : ''}`;
+      this.stateSlot = meta.querySelector('.state-slot');
+      if (c.retired) this.stateSlot.innerHTML = '<span class="badge">Retired</span>';
     }
 
     this.controls = this.div('detail-controls', header);
@@ -169,14 +175,9 @@ export default class CampaignProps extends Component {
       const isActive = c.active !== false;
       await this.draw(Button, { title: isActive ? 'Disable' : 'Enable', onClick: () => this.setActive(!isActive) }, this.controls);
       await this.draw(Button, { title: 'Settle', onClick: () => this.settle() }, this.controls);
-      // A backlog the budget can't cover: offer to write it off so a top-up serves forward.
-      if (this.report?.economics?.owed > 0) {
-        await this.draw(Button, { title: 'Write off backlog', onClick: () => this.writeOff() }, this.controls);
-      }
-      if (this.payer) {
-        await this.draw(Button, { title: 'Add budget', onClick: () => this.addBudget() }, this.controls);
-        await this.draw(Button, { title: 'Withdraw', onClick: () => this.withdraw() }, this.controls);
-      }
+      // Write-off + budget buttons depend on the contract read; _renderOps() draws
+      // them into this host, in place (before Copy/Delete), once report/payer land.
+      this.opsHost = this.div('ops-host', this.controls);
     }
     if (edit && !this.isNew) await this.draw(Button, { title: 'Copy', onClick: () => this.copy() }, this.controls);
     if (edit && !this.isNew) await this.draw(Button, { title: 'Delete', variant: 'danger', onClick: () => this.remove() }, this.controls);
@@ -187,8 +188,9 @@ export default class CampaignProps extends Component {
     }
 
     // Money — funded/spent/remaining and the value delivered / paid / unrealized, so
-    // the page SHOWS when a campaign is exhausted instead of just looking funded.
-    if (deployed) await this._renderMoney();
+    // the page SHOWS when a campaign is exhausted instead of just looking funded. The
+    // slot holds its position; _renderMoney fills it once the economics is read.
+    this.moneySlot = deployed ? this.div('money-slot') : null;
 
     // --- Campaign configuration ---
     const cfg = this._section('Campaign configuration');
@@ -224,25 +226,64 @@ export default class CampaignProps extends Component {
       await this.draw(CampaignReport, { campaign: c, context }, data);
       this.element.classList.add('deployed-locked');
     }
+
+    // --- the contract read, OFF the paint path ---
+    // The form is already on screen. One report() (the campaign's economics) and
+    // canPay() now fill the state badge, the money panel, the standing banners and
+    // the budget controls — the page no longer waits on the chain to appear.
+    if (deployed) {
+      const [payer, report] = await Promise.all([
+        canPay(ctx).catch(() => false),
+        context.factory.report(campaignKey(c)).catch(() => null),
+      ]);
+      if (!this.element?.isConnected) return;   // navigated away before the chain answered
+      this.payer = payer;
+      this.report = report;
+
+      if (this.stateSlot && !c.retired) {
+        const sb = report?.economics ? stateBadge(report.economics.state) : null;
+        this.stateSlot.innerHTML = sb ? `<span class="badge ${sb.cls}">${sb.label}</span>`
+          : this._unfunded() ? '<span class="badge state-unfunded">Unfunded</span>' : '';
+      }
+      await this._renderOps();
+      this._renderStanding();   // re-run now that the stake/economics are known
+      if (this.moneySlot) await this._renderMoney(this.moneySlot);
+    }
   }
 
-  _section(text) {
-    const section = this.div('section');
+  _section(text, host = this.element) {
+    const section = this.div('section', host);
     this.div('section-title', section).textContent = text;
     return this.div('section-panel', section);
+  }
+
+  // Write-off and the budget buttons — drawn into the controls once the contract is
+  // read: write-off only for a backlog the budget can't cover; Add budget / Withdraw
+  // only for a signer who can pay from this identity's treasury.
+  async _renderOps() {
+    const host = this.opsHost;
+    if (!host) return;
+    host.innerHTML = '';
+    if (this.report?.economics?.owed > 0) {
+      await this.draw(Button, { title: 'Write off backlog', onClick: () => this.writeOff() }, host);
+    }
+    if (this.payer) {
+      await this.draw(Button, { title: 'Add budget', onClick: () => this.addBudget() }, host);
+      await this.draw(Button, { title: 'Withdraw', onClick: () => this.withdraw() }, host);
+    }
   }
 
   // The money panel — budget burn and the value ledger (delivered / paid / unrealized),
   // read from the factory's own economics. All figures are the contract's and the
   // event log's; this only shows them. USD is a display label (null price = POL only).
-  async _renderMoney() {
+  async _renderMoney(host = this.element) {
     const econ = this.report?.economics;
     if (!econ) return;
     const price = await polUsd();
     const usd = (p) => { const s = fmtUsd(p, price); return s ? `<span class="money-usd">${s}</span>` : ''; };
     const burn = econ.budget > 0 ? Math.min(100, Math.round((econ.spent / econ.budget) * 100)) : 0;
 
-    const sec = this._section('Performance & budget');
+    const sec = this._section('Performance & budget', host);
     this.div('money', sec).innerHTML = `
       <div class="money-budget">
         <div class="money-burn" title="${burn}% of the stake spent"><span style="width:${burn}%"></span></div>

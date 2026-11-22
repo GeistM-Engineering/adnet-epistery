@@ -43,56 +43,63 @@ export default class Campaigns extends Component {
       toolbar.append(btn);
     }
 
-    // Health comes from the factory's one ledger (/publish/network): the real on-chain
-    // funding, not the declared budget. Lenient — if it can't be read, the list still
-    // renders (health shows '—'), never blocks on the chain.
     const summary = this.div('health-summary');
     const list = this.div('table-box');
-    try {
-      const [campaigns, net] = await Promise.all([
-        context.records.list('campaign'),
-        context.factory.network().catch(() => null)
-      ]);
-      campaigns.sort((a, b) => String(b._created).localeCompare(String(a._created)));
-      if (!campaigns?.length) {
-        list.innerHTML = '<p class="empty">No campaigns yet. Create one to start.</p>';
-        return;
-      }
 
-      // contractAddress → economics row. The number that matters is whether it's funded.
-      const econ = new Map((net?.campaigns || []).map((r) => [String(r.contractAddress || '').toLowerCase(), r]));
-      const tally = { funded: 0, needs: 0, other: 0 };
-      for (const c of campaigns) {
-        const h = health(c, econ);
-        if (h.key === 'funded') tally.funded++;
-        else if (h.key === 'needs') tally.needs++;
-        else tally.other++;
-      }
-      summary.innerHTML =
-        `<span class="hs funded"><b>${tally.funded}</b> funded</span>`
-        + `<span class="hs needs"><b>${tally.needs}</b> need funding</span>`
-        + `<span class="hs other"><b>${tally.other}</b> draft / paused</span>`;
-
-      list.innerHTML = `<table class="adnet-table">
-        <thead><tr><th>Name</th><th>Health</th><th>Funded</th><th>Budget (cap)</th><th>Unrealized</th><th>Deployed</th><th>Created</th></tr></thead>
-        <tbody>${campaigns.map((c) => {
-          const h = health(c, econ);
-          const e = h.e;
-          return `
-          <tr data-go="campaigns/${esc(c.id)}" class="${h.key === 'needs' ? 'needs-funding' : ''}">
-            <td>${esc(c.name)}</td>
-            <td><span class="badge ${h.cls}">${h.label}</span></td>
-            <td class="num">${e ? fmtPol(e.remaining, 2) : '—'}</td>
-            <td class="num">${c.budget != null ? '$' + esc(c.budget) : '—'}</td>
-            <td class="num">${e && e.unrealized > 0 ? fmtPol(e.unrealized, 2) : '—'}</td>
-            <td>${opBadge(c)}</td>
-            <td>${c._created ? new Date(c._created).toLocaleDateString() : '-'}</td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table>`;
-    } catch (e) {
-      list.innerHTML = failureNote(e, 'load campaigns');
+    // The list itself comes from this device's sealed records (fast); it paints NOW
+    // with everything local — name, budget cap, deployed, created — and placeholder
+    // health cells. The funding health is the factory's to say (/publish/network),
+    // a chain read, so it is fetched off the paint path and filled in below. The
+    // page never waits on the chain to show its campaigns.
+    let campaigns;
+    try { campaigns = await context.records.list('campaign'); }
+    catch (e) { list.innerHTML = failureNote(e, 'load campaigns'); return; }
+    campaigns.sort((a, b) => String(b._created).localeCompare(String(a._created)));
+    if (!campaigns?.length) {
+      list.innerHTML = '<p class="empty">No campaigns yet. Create one to start.</p>';
+      return;
     }
+
+    summary.innerHTML = `<span class="hs">…</span>`;
+    list.innerHTML = `<table class="adnet-table">
+      <thead><tr><th>Name</th><th>Health</th><th>Funded</th><th>Budget (cap)</th><th>Unrealized</th><th>Deployed</th><th>Created</th></tr></thead>
+      <tbody>${campaigns.map((c) => `
+        <tr data-go="campaigns/${esc(c.id)}" data-cid="${esc(c.id)}">
+          <td>${esc(c.name)}</td>
+          <td class="col-health"><span class="badge">…</span></td>
+          <td class="num col-funded">…</td>
+          <td class="num">${c.budget != null ? '$' + esc(c.budget) : '—'}</td>
+          <td class="num col-unrealized">—</td>
+          <td>${opBadge(c)}</td>
+          <td>${c._created ? new Date(c._created).toLocaleDateString() : '-'}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+
+    // --- the one cached chain read, off the paint path ---
+    const net = await context.factory.network().catch(() => null);
+    if (!this.element?.isConnected) return;   // navigated away before the chain answered
+
+    // contractAddress → economics row. The number that matters is whether it's funded.
+    const econ = new Map((net?.campaigns || []).map((r) => [String(r.contractAddress || '').toLowerCase(), r]));
+    const tally = { funded: 0, needs: 0, other: 0 };
+    for (const c of campaigns) {
+      const h = health(c, econ);
+      if (h.key === 'funded') tally.funded++;
+      else if (h.key === 'needs') tally.needs++;
+      else tally.other++;
+
+      const row = list.querySelector(`tr[data-cid="${c.id}"]`);
+      if (!row) continue;
+      if (h.key === 'needs') row.classList.add('needs-funding');
+      const e = h.e;
+      row.querySelector('.col-health').innerHTML = `<span class="badge ${h.cls}">${h.label}</span>`;
+      row.querySelector('.col-funded').textContent = e ? fmtPol(e.remaining, 2) : '—';
+      row.querySelector('.col-unrealized').textContent = e && e.unrealized > 0 ? fmtPol(e.unrealized, 2) : '—';
+    }
+    summary.innerHTML =
+      `<span class="hs funded"><b>${tally.funded}</b> funded</span>`
+      + `<span class="hs needs"><b>${tally.needs}</b> need funding</span>`
+      + `<span class="hs other"><b>${tally.other}</b> draft / paused</span>`;
   }
 
   teardown() { this.detail?.teardown?.(); }
