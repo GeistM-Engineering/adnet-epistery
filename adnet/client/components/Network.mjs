@@ -11,11 +11,14 @@
 // price source is unreachable).
 
 import Component from '/lib/componentry.mjs';
-import { esc, fmtPol, fmtUsd, polUsd, stateBadge, failureNote } from '../util.mjs';
+import { esc, fmtPol, fmtUsd, polUsd, stateBadge } from '../util.mjs';
+import { watch } from '../cache.mjs';
 
 export default class Network extends Component {
   static css = `
 .Network { display: flex; flex-direction: column; gap: var(--spacer2); min-width: 0; }
+/* A sink the ledger is painted into; its children flow in the Network flex as if direct. */
+.Network .net-body { display: contents; }
 .Network .tiles { display: flex; flex-wrap: wrap; gap: var(--spacer2); }
 .Network .tile { flex: 1 1 200px; min-width: 0; padding: var(--spacer2); background: var(--bg-color); border: 1px solid var(--page-border); border-radius: 10px; display: flex; flex-direction: column; gap: 2px; }
 .Network .tile .t-val { font-size: 1.8em; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -44,19 +47,30 @@ export default class Network extends Component {
 
   async render(element) {
     await super.render(element);
-    const { factory } = this.props.context;
+    const { context } = this.props;
+    this._price = await polUsd();   // display gloss; cached, non-chain
+    this.body = this.div('net-body');
+    this.body.innerHTML = '<p class="empty">Loading the network ledger…</p>';
+    // The ledger is the factory's /network, cached above the page. On a revisit it
+    // paints from the last value instantly; a background refresh (SWR) updates it in
+    // place — the same cached read Status and Campaigns share, so it is usually warm.
+    this._sub = watch(context.chain.network(), (net) => this._apply(net));
+  }
 
-    let net, price;
-    try { [net, price] = await Promise.all([factory.network(), polUsd()]); }
-    catch (e) { this.element.innerHTML = failureNote(e, 'load the network ledger'); return; }
-    if (!net) { this.element.innerHTML = '<p class="empty">No network data yet.</p>'; return; }
+  // undefined = not fetched yet (keep the loading line); null = fetch failed.
+  _apply(net) {
+    if (net === undefined || !this.element?.isConnected) return;
+    const body = this.body;
+    body.innerHTML = '';
+    if (!net) { body.innerHTML = '<p class="empty">No network data yet.</p>'; return; }
 
+    const price = this._price;
     const t = net.totals || {};
     const cc = t.campaignCounts || {};
     const usd = (p) => { const s = fmtUsd(p, price); return s ? `<div class="t-usd">${s}</div>` : ''; };
 
     // --- the three numbers that tell the story ---
-    const tiles = this.div('tiles');
+    const tiles = this.div('tiles', body);
     this.div('tile lead', tiles).innerHTML =
       `<div class="t-label">Value delivered</div><div class="t-val">${fmtPol(t.deliveredValue, 2)}</div>${usd(t.deliveredValue)}`
       + `<div class="t-hint">Everything adnet has served, at campaign rates</div>`;
@@ -68,7 +82,7 @@ export default class Network extends Component {
       + `<div class="t-hint">Earned by publishers who haven't keyed in yet — paid on adoption</div>`;
 
     // --- the supporting counts ---
-    const chips = this.div('chips');
+    const chips = this.div('chips', body);
     const chip = (k, v) => `<span class="chip"><b>${esc(String(v))}</b> <span class="chip-k">${esc(k)}</span></span>`;
     chips.innerHTML =
       chip('serving', cc.serving || 0) + chip('exhausted', cc.exhausted || 0)
@@ -78,15 +92,17 @@ export default class Network extends Component {
       + `<span class="chip"><b>${fmtPol(t.remaining, 2)}</b> <span class="chip-k">remaining</span></span>`;
 
     // --- delivered vs paid, by day ---
-    const chartWrap = this.div('chart');
+    const chartWrap = this.div('chart', body);
     this.div('section-title', chartWrap).textContent = 'Delivered vs paid, by day';
     chartWrap.insertAdjacentHTML('beforeend', this._chart(net.series || []));
 
     // --- per-campaign ledger ---
-    const tableWrap = this.div('table');
+    const tableWrap = this.div('table', body);
     this.div('section-title', tableWrap).textContent = 'Campaigns';
     tableWrap.insertAdjacentHTML('beforeend', this._table(net.campaigns || [], price));
   }
+
+  teardown() { this._sub?.(); this._sub = null; }
 
   // Each day: the full delivered value as a muted bar, the paid value solid inside
   // it. The gap that stays muted IS the unrealized backlog — the pitch, drawn.

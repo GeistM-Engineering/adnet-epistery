@@ -28,6 +28,7 @@ import { mintShortCode } from './Links.mjs';
 import { creativeUrl } from '../creatives.mjs';
 import { announce } from '../scan.mjs';
 import { factoryAuth, addBudget, withdrawBudget, canPay, treasury, signerAddress, explorer } from '../signer.mjs';
+import { watch } from '../cache.mjs';
 
 const STATUS_OPTIONS = ['ACTIVE', 'PAUSED', 'INACTIVE'];
 // The payment rule the Agency enforces at settlement, baked onto the contract at
@@ -60,10 +61,10 @@ export default class CampaignProps extends Component {
 .CampaignProps .field-note { margin: var(--spacer) 0 0; font-size: 0.8em; color: var(--text-muted); }
 .CampaignProps .field-note strong { color: var(--text-color); font-family: ui-monospace, monospace; }
 .CampaignProps .field-readonly label { display: block; font-size: 0.85em; color: var(--text-muted); margin-bottom: var(--spacerhalf); }
-.CampaignProps .field-readonly .ro-value { padding: var(--spacerhalf) var(--spacer); background: var(--steel-50); border-radius: 4px; }
+.CampaignProps .field-readonly .ro-value { padding: var(--spacerhalf) var(--spacer); background: var(--adnet-quiet-bg); border-radius: 4px; }
 .CampaignProps .money { display: flex; flex-wrap: wrap; gap: var(--spacer2); align-items: stretch; }
 .CampaignProps .money-budget { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: var(--spacer); }
-.CampaignProps .money-burn { height: 8px; border-radius: 999px; background: var(--steel-50); overflow: hidden; }
+.CampaignProps .money-burn { height: 8px; border-radius: 999px; background: var(--adnet-quiet-bg); overflow: hidden; }
 .CampaignProps .money-burn span { display: block; height: 100%; background: var(--primary-mid); border-radius: 999px; }
 .CampaignProps .mb-rows { display: flex; flex-direction: column; gap: var(--spacerhalf); }
 .CampaignProps .mb-row { display: flex; align-items: baseline; gap: var(--spacer); font-size: 0.95em; }
@@ -72,9 +73,9 @@ export default class CampaignProps extends Component {
 .CampaignProps .money-usd { color: var(--text-muted); font-size: 0.85em; }
 .CampaignProps .mb-pct { margin-left: auto; color: var(--text-muted); font-size: 0.85em; }
 .CampaignProps .money-ledger { flex: 2 1 320px; min-width: 0; display: flex; gap: var(--spacer); }
-.CampaignProps .money-tile { flex: 1 1 0; min-width: 0; border: 1px solid var(--page-border); border-radius: 8px; padding: var(--spacer); background: var(--steel-50); display: flex; flex-direction: column; gap: 2px; }
+.CampaignProps .money-tile { flex: 1 1 0; min-width: 0; border: 1px solid var(--page-border); border-radius: 8px; padding: var(--spacer); background: var(--adnet-quiet-bg); display: flex; flex-direction: column; gap: 2px; }
 .CampaignProps .money-tile .mt-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.CampaignProps .money-tile .mt-val { font-size: 1.3em; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.CampaignProps .money-tile .mt-val { font-size: 1.3em; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; color: var(--text-color); }
 .CampaignProps .money-tile .mt-usd { color: var(--text-muted); font-size: 0.85em; }
 .CampaignProps .money-tile .mt-hint { font-size: 0.75em; color: var(--text-muted); margin-top: var(--spacerhalf); }
 .CampaignProps .money-tile.is-unrealized { border-color: color-mix(in srgb, var(--adnet-warn) 45%, var(--page-border)); background: color-mix(in srgb, var(--adnet-warn) 8%, transparent); }
@@ -93,6 +94,11 @@ export default class CampaignProps extends Component {
 
   async render(element) {
     await super.render(element);
+    // _run() redraws by calling render() again on THIS instance (no teardown), so
+    // drop any prior report watcher before re-wiring — otherwise each act leaves a
+    // live subscription behind and the economics get applied twice on every refresh.
+    this._reportSub?.();
+    this._reportSub = null;
     const { context } = this;
     const { ctx } = context;
     if (this.isNew) {
@@ -227,28 +233,34 @@ export default class CampaignProps extends Component {
       this.element.classList.add('deployed-locked');
     }
 
-    // --- the contract read, OFF the paint path ---
-    // The form is already on screen. One report() (the campaign's economics) and
-    // canPay() now fill the state badge, the money panel, the standing banners and
-    // the budget controls — the page no longer waits on the chain to appear.
+    // --- the contract read, OFF the paint path, cached ACROSS navigation ---
+    // The form is already on screen. canPay() is a local signer check (fast). The
+    // economics (report) are watched from the context cache: on a revisit the last
+    // value fills the state badge, money panel, standing banners and budget buttons
+    // instantly, and a background refresh (SWR) updates them — flipping between this
+    // page and the list no longer re-blanks and re-waits on the chain.
     if (deployed) {
-      const [payer, report] = await Promise.all([
-        canPay(ctx).catch(() => false),
-        context.factory.report(campaignKey(c)).catch(() => null),
-      ]);
-      if (!this.element?.isConnected) return;   // navigated away before the chain answered
-      this.payer = payer;
-      this.report = report;
-
-      if (this.stateSlot && !c.retired) {
-        const sb = report?.economics ? stateBadge(report.economics.state) : null;
-        this.stateSlot.innerHTML = sb ? `<span class="badge ${sb.cls}">${sb.label}</span>`
-          : this._unfunded() ? '<span class="badge state-unfunded">Unfunded</span>' : '';
-      }
-      await this._renderOps();
-      this._renderStanding();   // re-run now that the stake/economics are known
-      if (this.moneySlot) await this._renderMoney(this.moneySlot);
+      this.payer = await canPay(ctx).catch(() => false);
+      if (!this.element?.isConnected) return;   // navigated away before canPay resolved
+      this._reportSub = watch(context.chain.report(campaignKey(c)), (rep) => this._applyReport(rep));
     }
+  }
+
+  // undefined = not fetched yet (keep the form as painted); null = fetch failed. Runs
+  // on the first read and on every background refresh, so each redraw is idempotent:
+  // the ops host and money slot are cleared before they are rebuilt.
+  _applyReport(report) {
+    if (report === undefined || !this.element?.isConnected) return;
+    this.report = report;
+    const c = this.campaign;
+    if (this.stateSlot && !c.retired) {
+      const sb = report?.economics ? stateBadge(report.economics.state) : null;
+      this.stateSlot.innerHTML = sb ? `<span class="badge ${sb.cls}">${sb.label}</span>`
+        : this._unfunded() ? '<span class="badge state-unfunded">Unfunded</span>' : '';
+    }
+    this._renderOps();            // clears + redraws the budget buttons
+    this._renderStanding();       // the stake/announce banners, now that economics are known
+    if (this.moneySlot) { this.moneySlot.innerHTML = ''; this._renderMoney(this.moneySlot); }
   }
 
   _section(text, host = this.element) {
@@ -377,6 +389,9 @@ export default class CampaignProps extends Component {
     const step = (text) => this._banner('running', `${title} — ${text}…`);
     try {
       const done = await fn(step);
+      // The act changed the on-chain truth, so drop the cached reads it touched; the
+      // redraw below then refetches instead of painting the pre-act economics.
+      this.context.chain?.touched(campaignKey(this.campaign));
       // Redraw this page from the updated record, then say what happened.
       this.components = [];
       await this.render();
@@ -719,6 +734,8 @@ export default class CampaignProps extends Component {
   }
 
   teardown() {
+    this._reportSub?.();
+    this._reportSub = null;
     for (const comp of this.components) comp.teardown?.();
   }
 }

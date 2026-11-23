@@ -6,7 +6,8 @@
 
 import Component from '/lib/componentry.mjs';
 import { esc, shortAddr, fmtPol, weiToPol, polUsd, failureNote, stateBadge } from '../util.mjs';
-import { treasury, explorer } from '../signer.mjs';
+import { explorer } from '../signer.mjs';
+import { watch } from '../cache.mjs';
 
 const num = (v) => Number(v) || 0;
 const TYPE = { fund: 'Staked', budget: 'Budget added', withdraw: 'Withdrawn' };
@@ -49,11 +50,13 @@ export default class Status extends Component {
     const [price, x] = await Promise.all([polUsd(), explorer()]);
     const usd = (p) => (price != null && p != null ? ` <span class="usd">($${(p * price).toFixed(2)})</span>` : '');
     const addr = (a) => `<a href="${esc(x.address(a))}" target="_blank" rel="noopener" class="mono">${shortAddr(a)}</a>`;
+    // Kept for the cache watchers (which patch these after the page is built).
+    this._usd = usd; this._addr = addr; this._owner = owner; this.deployed = deployed;
 
     // --- the treasury: the one balance that stakes every campaign (filled after) ---
     const stats = this.div('stats');
-    const treTile = this.div('stat', stats);
-    const stakedTile = this.div('stat', stats);
+    const treTile = this.treTile = this.div('stat', stats);
+    const stakedTile = this.stakedTile = this.div('stat', stats);
     treTile.innerHTML = `<div class="stat-value">…</div>
       <div class="stat-label">Identity treasury · ${addr(owner)}</div>`;
     stakedTile.innerHTML = `<div class="stat-value">…</div>
@@ -65,7 +68,7 @@ export default class Status extends Component {
     }
 
     // --- deployed campaigns: names / rule / contract now; economics fill in ---
-    const camps = this.div('panel');
+    const camps = this.camps = this.div('panel');
     if (!deployed.length) {
       camps.innerHTML = '<h2>Campaigns</h2><p class="empty">No deployed campaigns yet.</p>';
     } else {
@@ -114,45 +117,54 @@ export default class Status extends Component {
       <span class="mono">${esc(owner)}</span> as the advertiser. Each is its own contract, staked from the identity's
       treasury on a signer's signature; the balances above are read from those contracts.</p>`;
 
-    // --- the chain reads, OFF the paint path ---
-    // One cached /network call carries every campaign's economics at once — not a
-    // /report per campaign. That fan-out (N uncached contract reads, issued one
-    // request at a time) is what made this page sit blank on the chain; /network
-    // reads the same contracts in parallel behind a 30s cache. The page is already
-    // interactive — these only fill the money cells when they arrive.
-    const [tre, net] = await Promise.all([
-      treasury(ctx).catch(() => null),
-      factory.network().catch(() => null),
-    ]);
-    if (!this.element?.isConnected) return;   // navigated away before the chain answered
+    // --- chain-backed figures: cached ABOVE the page, so they survive a flip ---
+    // The treasury balance and the network economics are watched from the context
+    // cache. First visit: the cells hold their '…' placeholder until the background
+    // read lands. Every later visit: the last value paints instantly and a
+    // background refresh (SWR) updates it in place — the summary never blanks.
+    this._subs = [
+      watch(context.chain.treasury(), (tre) => this._applyTreasury(tre)),
+      watch(context.chain.network(), (net) => this._applyNetwork(net)),
+    ];
+  }
 
-    treTile.innerHTML = `<div class="stat-value">${fmtPol(tre?.pol)}${usd(tre?.pol)}</div>
-      <div class="stat-label">Identity treasury · ${addr(owner)}</div>`;
+  // undefined = not fetched yet (keep the placeholder); null = fetch failed (show —).
+  _applyTreasury(tre) {
+    if (tre === undefined || !this.element?.isConnected) return;
+    this.treTile.innerHTML = `<div class="stat-value">${fmtPol(tre?.pol)}${this._usd(tre?.pol)}</div>
+      <div class="stat-label">Identity treasury · ${this._addr(this._owner)}</div>`;
+  }
+
+  _applyNetwork(net) {
+    if (net === undefined || !this.element?.isConnected) return;
     const remaining = net ? num(net.totals?.remaining) : null;
-    stakedTile.innerHTML = `<div class="stat-value">${fmtPol(remaining)}${usd(remaining)}</div>
+    this.stakedTile.innerHTML = `<div class="stat-value">${fmtPol(remaining)}${this._usd(remaining)}</div>
       <div class="stat-label">Staked and unspent across campaigns</div>`;
-
-    if (deployed.length) {
-      // contractAddress → the network's per-campaign economics row.
-      const econ = new Map((net?.campaigns || []).map((r) => [String(r.contractAddress || '').toLowerCase(), r]));
-      // Delivered with the settled subset beside it: "12 · 8 ✓". A muted "0 ✓" is
-      // exactly what an advertiser needs to notice — delivered, unpaid.
-      const vc = (d, st) => (d == null ? '—' : st == null ? `${d}` : `${d} <span class="settled${st > 0 ? '' : ' settled-none'}">${st}&nbsp;✓</span>`);
-      for (const c of deployed) {
-        const row = camps.querySelector(`tr[data-cid="${c.id}"]`);
-        if (!row) continue;
-        const r = econ.get(String(c.contractAddress).toLowerCase());
-        // The serving state is the economics owner's to say (serving / exhausted /
-        // unfunded / paused); retired is this record's own.
-        const sb = r ? stateBadge(r.state) : null;
-        row.querySelector('.col-badge').innerHTML = c.retired ? '<span class="badge">Retired</span>'
-          : sb ? `<span class="badge ${sb.cls}">${sb.label}</span>` : '<span class="badge">—</span>';
-        row.querySelector('.col-budget').textContent = fmtPol(r ? num(r.budget) : null);
-        row.querySelector('.col-spent').textContent = fmtPol(r ? num(r.spent) : null);
-        row.querySelector('.col-remaining').innerHTML = `<strong>${fmtPol(r ? num(r.remaining) : null)}</strong>`;
-        row.querySelector('.col-views').innerHTML = vc(r?.delivered ? num(r.delivered.views) : null, r?.settled ? num(r.settled.views) : null);
-        row.querySelector('.col-clicks').innerHTML = vc(r?.delivered ? num(r.delivered.clicks) : null, r?.settled ? num(r.settled.clicks) : null);
-      }
+    if (!this.deployed.length) return;
+    // contractAddress → the network's per-campaign economics row.
+    const econ = new Map((net?.campaigns || []).map((r) => [String(r.contractAddress || '').toLowerCase(), r]));
+    // Delivered with the settled subset beside it: "12 · 8 ✓". A muted "0 ✓" is
+    // exactly what an advertiser needs to notice — delivered, unpaid.
+    const vc = (d, st) => (d == null ? '—' : st == null ? `${d}` : `${d} <span class="settled${st > 0 ? '' : ' settled-none'}">${st}&nbsp;✓</span>`);
+    for (const c of this.deployed) {
+      const row = this.camps.querySelector(`tr[data-cid="${c.id}"]`);
+      if (!row) continue;
+      const r = econ.get(String(c.contractAddress).toLowerCase());
+      // The serving state is the economics owner's to say (serving / exhausted /
+      // unfunded / paused); retired is this record's own.
+      const sb = r ? stateBadge(r.state) : null;
+      row.querySelector('.col-badge').innerHTML = c.retired ? '<span class="badge">Retired</span>'
+        : sb ? `<span class="badge ${sb.cls}">${sb.label}</span>` : '<span class="badge">—</span>';
+      row.querySelector('.col-budget').textContent = fmtPol(r ? num(r.budget) : null);
+      row.querySelector('.col-spent').textContent = fmtPol(r ? num(r.spent) : null);
+      row.querySelector('.col-remaining').innerHTML = `<strong>${fmtPol(r ? num(r.remaining) : null)}</strong>`;
+      row.querySelector('.col-views').innerHTML = vc(r?.delivered ? num(r.delivered.views) : null, r?.settled ? num(r.settled.views) : null);
+      row.querySelector('.col-clicks').innerHTML = vc(r?.delivered ? num(r.delivered.clicks) : null, r?.settled ? num(r.settled.clicks) : null);
     }
+  }
+
+  teardown() {
+    this._subs?.forEach((u) => u());
+    this._subs = null;
   }
 }

@@ -11,7 +11,12 @@
   --adnet-warn: var(--status-warning);
   --adnet-bad: var(--status-error);
   --adnet-busy: var(--primary-mid);
-  --adnet-quiet-bg: var(--steel-50);
+  /* A quiet raised-panel fill, derived from the theme's own text colour so it
+     adapts: a faint dark tint on a light theme, a faint light tint on a dark one.
+     The console token --steel-50 this used to alias is a FIXED light colour with no
+     dark variant (and absent entirely in some host consoles), so on a dark theme it
+     turned every adnet tile near-white and the text on it unreadable. */
+  --adnet-quiet-bg: color-mix(in srgb, var(--text-color) 6%, transparent);
   display: flex;
   flex-direction: column;
   min-width: 0;

@@ -22,6 +22,7 @@ import Monitor from './Monitor.mjs';
 import Network from './Network.mjs';
 import { recordsFor } from '../records.mjs';
 import { factoryFor } from '../factory.mjs';
+import { chainCache } from '../cache.mjs';
 
 const PAGES = {
   status: { title: 'Status', glyph: '◎', component: Status },
@@ -71,6 +72,11 @@ export default class Main extends Component {
       go: (p) => this.go(p),
       refresh: () => this.go(this.context.path.slice(1)),
     };
+    // The chain-backed reads, cached ABOVE the pages so flipping between them keeps
+    // the numbers on screen; each page watches the handles it needs. Lives on the
+    // context, so it persists for the life of this mounted session and resets when
+    // the session is remounted.
+    this.context.chain = chainCache(this.context);
   }
 
   _activeKey() {

@@ -7,6 +7,7 @@
 import Component from '/lib/componentry.mjs';
 import CampaignProps from './CampaignProps.mjs';
 import { esc, failureNote, fmtPol } from '../util.mjs';
+import { watch } from '../cache.mjs';
 
 export default class Campaigns extends Component {
   static css = `
@@ -43,8 +44,8 @@ export default class Campaigns extends Component {
       toolbar.append(btn);
     }
 
-    const summary = this.div('health-summary');
-    const list = this.div('table-box');
+    const summary = this.summary = this.div('health-summary');
+    const list = this.list = this.div('table-box');
 
     // The list itself comes from this device's sealed records (fast); it paints NOW
     // with everything local — name, budget cap, deployed, created — and placeholder
@@ -59,6 +60,7 @@ export default class Campaigns extends Component {
       list.innerHTML = '<p class="empty">No campaigns yet. Create one to start.</p>';
       return;
     }
+    this.campaigns = campaigns;
 
     summary.innerHTML = `<span class="hs">…</span>`;
     list.innerHTML = `<table class="adnet-table">
@@ -75,34 +77,41 @@ export default class Campaigns extends Component {
         </tr>`).join('')}</tbody>
     </table>`;
 
-    // --- the one cached chain read, off the paint path ---
-    const net = await context.factory.network().catch(() => null);
-    if (!this.element?.isConnected) return;   // navigated away before the chain answered
+    // --- funding health: watched from the context cache (SWR) ---
+    // The economics come from the factory's one ledger (/publish/network), cached
+    // above the page. The list already shows every campaign; this fills the health
+    // column and the summary from the last value instantly on a revisit, and a
+    // background refresh updates them — flipping back from a campaign never blanks it.
+    this._sub = watch(context.chain.network(), (net) => this._applyNetwork(net));
+  }
 
+  // undefined = not fetched yet (keep the placeholders); null = fetch failed (— / draft).
+  _applyNetwork(net) {
+    if (net === undefined || !this.element?.isConnected) return;
     // contractAddress → economics row. The number that matters is whether it's funded.
     const econ = new Map((net?.campaigns || []).map((r) => [String(r.contractAddress || '').toLowerCase(), r]));
     const tally = { funded: 0, needs: 0, other: 0 };
-    for (const c of campaigns) {
+    for (const c of this.campaigns) {
       const h = health(c, econ);
       if (h.key === 'funded') tally.funded++;
       else if (h.key === 'needs') tally.needs++;
       else tally.other++;
 
-      const row = list.querySelector(`tr[data-cid="${c.id}"]`);
+      const row = this.list.querySelector(`tr[data-cid="${c.id}"]`);
       if (!row) continue;
-      if (h.key === 'needs') row.classList.add('needs-funding');
+      row.classList.toggle('needs-funding', h.key === 'needs');
       const e = h.e;
       row.querySelector('.col-health').innerHTML = `<span class="badge ${h.cls}">${h.label}</span>`;
       row.querySelector('.col-funded').textContent = e ? fmtPol(e.remaining, 2) : '—';
       row.querySelector('.col-unrealized').textContent = e && e.unrealized > 0 ? fmtPol(e.unrealized, 2) : '—';
     }
-    summary.innerHTML =
+    this.summary.innerHTML =
       `<span class="hs funded"><b>${tally.funded}</b> funded</span>`
       + `<span class="hs needs"><b>${tally.needs}</b> need funding</span>`
       + `<span class="hs other"><b>${tally.other}</b> draft / paused</span>`;
   }
 
-  teardown() { this.detail?.teardown?.(); }
+  teardown() { this._sub?.(); this._sub = null; this.detail?.teardown?.(); }
 }
 
 // The campaign's real funding health, from the factory economics. `funded` = it can
